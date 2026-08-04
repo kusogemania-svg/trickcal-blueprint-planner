@@ -26,6 +26,8 @@ export function validateMasterData(data) {
 
   const itemIds = data.items.map((item) => item?.id);
   if (!hasUniqueValues(itemIds)) errors.push("設計図IDが重複しています。");
+  const itemKeys = data.items.map(itemIdentityKey);
+  if (!hasUniqueValues(itemKeys)) errors.push("同じランクと装備分類の設計図が重複しています。");
 
   for (const [index, item] of data.items.entries()) {
     const label = `設計図${index + 1}`;
@@ -37,7 +39,9 @@ export function validateMasterData(data) {
     if (item?.category != null && typeof item.category !== "string") {
       errors.push(`${label}の装備分類が不正です。`);
     }
-    if (!Number.isInteger(item?.sortOrder)) errors.push(`${label}の表示順が不正です。`);
+    if (isNonEmptyString(item?.name) && item.name !== deriveItemName(item)) {
+      errors.push(`${label}の名称がランクと装備分類に一致しません。`);
+    }
     if (item?.icon != null) {
       if (!ALLOWED_IMAGE_TYPES.has(item.icon.mimeType) || !isNonEmptyString(item.icon.data)) {
         errors.push(`${label}のアイコン画像が不正です。`);
@@ -47,15 +51,21 @@ export function validateMasterData(data) {
 
   const stageIds = data.stages.map((stage) => stage?.id);
   const stageNames = data.stages.map((stage) => stage?.name?.trim());
+  const stageKeys = data.stages.map(stageIdentityKey);
   if (!hasUniqueValues(stageIds)) errors.push("ステージIDが重複しています。");
   if (!hasUniqueValues(stageNames)) errors.push("ステージ名が重複しています。");
+  if (!hasUniqueValues(stageKeys)) errors.push("同じ章番号とステージ番号が重複しています。");
 
   const itemIdSet = new Set(itemIds);
   for (const [index, stage] of data.stages.entries()) {
     const label = `ステージ${index + 1}`;
     if (!isNonEmptyString(stage?.id)) errors.push(`${label}のIDが不正です。`);
     if (!isNonEmptyString(stage?.name)) errors.push(`${label}の名称が空です。`);
-    if (!Number.isInteger(stage?.sortOrder)) errors.push(`${label}の表示順が不正です。`);
+    if (!Number.isInteger(stage?.chapter) || stage.chapter < 1) errors.push(`${label}の章番号が不正です。`);
+    if (!Number.isInteger(stage?.number) || stage.number < 1) errors.push(`${label}のステージ番号が不正です。`);
+    if (isNonEmptyString(stage?.name) && stage.name !== deriveStageName(stage)) {
+      errors.push(`${label}の名称が章番号とステージ番号に一致しません。`);
+    }
     if (!Array.isArray(stage?.drops) || stage.drops.length === 0) {
       errors.push(`${label}にドロップがありません。`);
       continue;
@@ -80,3 +90,4 @@ export function assertValidMasterData(data) {
   if (!result.valid) throw new Error(result.errors.join("\n"));
   return data;
 }
+import { deriveItemName, deriveStageName, itemIdentityKey, stageIdentityKey } from "./catalog.js";

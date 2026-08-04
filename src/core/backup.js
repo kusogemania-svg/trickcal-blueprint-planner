@@ -1,5 +1,5 @@
 import { assertValidMasterData, validateMasterData } from "./validator.js";
-import { migrateKnownNames } from "./migrations.js";
+import { normalizeMasterData } from "./migrations.js";
 
 export function createBackup(masterData) {
   return {
@@ -29,10 +29,11 @@ export function parseBackup(text) {
     throw new Error("JSONファイルを読み取れませんでした。");
   }
 
-  const validation = validateMasterData(parsed);
+  const normalized = normalizeMasterData(parsed).data;
+  const validation = validateMasterData(normalized);
   if (!validation.valid) throw new Error(validation.errors.join("\n"));
 
-  const restored = structuredClone(parsed);
+  const restored = structuredClone(normalized);
   delete restored.exportedAt;
-  return assertValidMasterData(migrateKnownNames(restored).data);
+  return assertValidMasterData(restored);
 }

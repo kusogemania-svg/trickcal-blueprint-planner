@@ -31,3 +31,13 @@ test("初期設計図は短縮した分類名と名称を使用する", () => {
   assert.ok(categories.has("杖"));
   assert.ok(INITIAL_DATA.items.every((item) => !/の(?:設計図|欠片)$/.test(item.name)));
 });
+
+test("設計図とステージの重複を検出する", () => {
+  const duplicateItemData = structuredClone(INITIAL_DATA);
+  duplicateItemData.items.push({ ...duplicateItemData.items[0], id: "duplicate-item" });
+  assert.match(validateMasterData(duplicateItemData).errors.join("\n"), /ランクと装備分類.*重複/);
+
+  const duplicateStageData = structuredClone(INITIAL_DATA);
+  duplicateStageData.stages.push({ ...duplicateStageData.stages[0], id: "duplicate-stage" });
+  assert.match(validateMasterData(duplicateStageData).errors.join("\n"), /章番号とステージ番号.*重複/);
+});

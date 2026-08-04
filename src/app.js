@@ -1,5 +1,13 @@
-import { ITEM_CATEGORIES } from "../data/initial-data.js";
 import { downloadBackup, parseBackup } from "./core/backup.js";
+import {
+  CATEGORY_ORDER,
+  compareItems,
+  compareStages,
+  deriveItemName,
+  deriveStageName,
+  itemIdentityKey,
+  stageIdentityKey,
+} from "./core/catalog.js";
 import { loadMasterData, resetMasterData, saveMasterData } from "./core/storage.js";
 
 const app = document.querySelector("#app");
@@ -12,8 +20,9 @@ const state = {
   result: null,
   busy: false,
   worker: null,
+  calculationTimer: null,
   modal: null,
-  selector: { query: "", rank: "", category: "" },
+  selector: { ranks: [], categories: [], draftIds: [] },
   editorQuery: "",
   toast: "",
 };
@@ -69,7 +78,7 @@ function navButton(view, label, glyph) {
 }
 
 function renderHeader() {
-  const labels = { planner: "最小周回を計算", editor: "データ編集", backup: "バックアップ" };
+  const labels = { planner: "最小周回プラン", editor: "データ編集", backup: "バックアップ" };
   return `<header class="app-header">
     <div class="app-title"><span class="mini-mark" aria-hidden="true">設</span><div><small>TRICKCAL TOOL</small><strong>${labels[state.view]}</strong></div></div>
     <span class="local-badge">端末内保存</span>
@@ -155,7 +164,6 @@ function renderResult() {
 }
 
 function renderPlanner() {
-  const valid = validateRequests();
   return `<main class="main-content planner-content">
     <section class="intro-card"><p class="eyebrow">100% DROP SIMULATION</p><h1>欲しい設計図を<br />いちばん少ない周回で。</h1><p>設計図と必要数を選ぶと、副産物まで含めた最短ルートを計算します。</p><div class="assumption-chip">1周で登録ドロップを各1個獲得</div></section>
     <section class="request-section"><div class="section-heading"><div><small>STEP 1</small><h2>必要な設計図</h2></div><span>${state.requests.length}件</span></div>
@@ -166,48 +174,64 @@ function renderPlanner() {
       }</div>
       <button class="secondary-button full" data-open-selector>設計図を追加</button>
     </section>
+    ${state.busy ? '<div class="calculation-status" role="status"><span aria-hidden="true"></span>結果を更新しています…</div>' : ""}
     ${renderResult()}
-    <div class="calculate-dock"><button class="primary-button" data-calculate ${valid && !state.busy ? "" : "disabled"}>${
-      state.busy ? "計算しています…" : "最小周回を計算"
-    }</button>${state.busy ? '<button class="text-button" data-cancel>キャンセル</button>' : ""}</div>
   </main>`;
 }
 
 function renderItemSelector() {
-  const selectedIds = new Set(state.requests.map((request) => request.itemId));
-  const ranks = [...new Set(state.masterData.items.map((item) => item.rank).filter(Boolean))].sort((a, b) => b - a);
-  const categories = [...new Set(state.masterData.items.map((item) => item.category).filter(Boolean))].sort((a, b) =>
-    a.localeCompare(b, "ja"),
-  );
-  const query = state.selector.query.toLowerCase();
-  const filtered = state.masterData.items.filter(
-    (item) =>
-      (!query || item.name.toLowerCase().includes(query)) &&
-      (!state.selector.rank || String(item.rank) === state.selector.rank) &&
-      (!state.selector.category || item.category === state.selector.category),
-  );
+  const alreadyAddedIds = new Set(state.requests.map((request) => request.itemId));
+  const draftIds = new Set(state.selector.draftIds);
+  const ranks = [...new Set(state.masterData.items.map((item) => item.rank ?? "__unset__"))].sort((a, b) => {
+    if (a === "__unset__") return -1;
+    if (b === "__unset__") return 1;
+    return b - a;
+  });
+  const categorySet = new Set(state.masterData.items.map((item) => item.category?.trim() || "__unset__"));
+  const categories = [
+    ...(categorySet.has("__unset__") ? ["__unset__"] : []),
+    ...CATEGORY_ORDER.filter((category) => categorySet.has(category)),
+    ...[...categorySet]
+      .filter((category) => category !== "__unset__" && !CATEGORY_ORDER.includes(category))
+      .sort((a, b) => a.localeCompare(b, "ja")),
+  ];
+  const selectedRanks = new Set(state.selector.ranks);
+  const selectedCategories = new Set(state.selector.categories);
+  const filtered = [...state.masterData.items].sort(compareItems).filter((item) => {
+    const rankKey = item.rank ?? "__unset__";
+    const categoryKey = item.category?.trim() || "__unset__";
+    return (
+      (selectedRanks.size === 0 || selectedRanks.has(String(rankKey))) &&
+      (selectedCategories.size === 0 || selectedCategories.has(categoryKey))
+    );
+  });
 
   return `<div class="modal-backdrop" data-close-modal><section class="modal-sheet selector-sheet" role="dialog" aria-modal="true" aria-labelledby="selector-title" data-modal-panel>
-    <div class="modal-handle"></div><div class="modal-header"><div><small>SELECT BLUEPRINT</small><h2 id="selector-title">設計図を選択</h2></div><button class="icon-button" data-close-modal aria-label="閉じる">×</button></div>
-    <div class="selector-filters"><input type="search" placeholder="名称で検索" value="${escapeHtml(
-      state.selector.query,
-    )}" data-selector-query /><div class="filter-row"><select data-selector-rank><option value="">すべてのランク</option>${ranks
-      .map((rank) => `<option value="${rank}" ${state.selector.rank === String(rank) ? "selected" : ""}>ランク${rank}</option>`)
-      .join("")}</select><select data-selector-category><option value="">すべての分類</option>${categories
-      .map(
-        (category) =>
-          `<option value="${escapeHtml(category)}" ${state.selector.category === category ? "selected" : ""}>${escapeHtml(
-            category,
-          )}</option>`,
-      )
-      .join("")}</select></div></div>
+    <div class="modal-handle"></div><div class="modal-header"><div><small>SELECT BLUEPRINT</small><h2 id="selector-title">設計図を選択</h2></div><button class="confirm-button" data-confirm-selection>確定${draftIds.size ? `（${draftIds.size}）` : ""}</button></div>
+    <div class="selector-filters"><fieldset class="filter-group"><legend>ランク（複数選択可）</legend><div class="filter-chips">${ranks
+      .map((rank) => {
+        const value = String(rank);
+        const active = selectedRanks.has(value);
+        return `<button type="button" class="filter-chip ${active ? "active" : ""}" data-filter-rank="${escapeHtml(
+          value,
+        )}" aria-pressed="${active}">${rank === "__unset__" ? "未設定" : `ランク${rank}`}</button>`;
+      })
+      .join("")}</div></fieldset><fieldset class="filter-group"><legend>分類（複数選択可）</legend><div class="filter-chips">${categories
+      .map((category) => {
+        const active = selectedCategories.has(category);
+        return `<button type="button" class="filter-chip ${active ? "active" : ""}" data-filter-category="${escapeHtml(
+          category,
+        )}" aria-pressed="${active}">${escapeHtml(category === "__unset__" ? "未設定" : category)}</button>`;
+      })
+      .join("")}</div></fieldset></div>
     <div class="item-grid">${filtered
       .map((item) => {
-        const selected = selectedIds.has(item.id);
-        return `<button class="item-choice ${selected ? "selected" : ""}" data-select-item="${escapeHtml(item.id)}" ${
-          selected ? "disabled" : ""
+        const alreadyAdded = alreadyAddedIds.has(item.id);
+        const selected = draftIds.has(item.id);
+        return `<button class="item-choice ${alreadyAdded ? "already-added" : ""} ${selected ? "selected" : ""}" data-select-item="${escapeHtml(item.id)}" ${
+          alreadyAdded ? "disabled" : ""
         }>${itemIcon(item)}<span><small>RANK ${item.rank ?? "-"}</small><strong>${escapeHtml(item.category || item.name)}</strong></span>${
-          selected ? '<em>選択済み</em>' : ""
+          alreadyAdded ? '<em>追加済み</em>' : selected ? '<em>選択中</em>' : ""
         }</button>`;
       })
       .join("")}</div>
@@ -217,9 +241,9 @@ function renderItemSelector() {
 function renderEditor() {
   const isItems = state.editSection === "items";
   const query = state.editorQuery.toLowerCase();
-  const entries = (isItems ? state.masterData.items : state.masterData.stages).filter((entry) =>
-    entry.name.toLowerCase().includes(query),
-  );
+  const entries = [...(isItems ? state.masterData.items : state.masterData.stages)]
+    .sort(isItems ? compareItems : compareStages)
+    .filter((entry) => entry.name.toLowerCase().includes(query));
   const cards = entries
     .map((entry) => {
       if (isItems) {
@@ -243,7 +267,7 @@ function renderEditor() {
     <section class="manage-section"><div class="section-heading"><div><small>${isItems ? "BLUEPRINTS" : "STAGES"}</small><h2>${
       isItems ? "設計図管理" : "ステージ管理"
     }</h2></div><span>${entries.length}件</span></div>
-      <div class="manage-tools"><input type="search" placeholder="名称で検索" value="${escapeHtml(
+      <div class="manage-tools"><input type="search" placeholder="${isItems ? "ランク・分類で検索" : "ステージ番号で検索"}" value="${escapeHtml(
         state.editorQuery,
       )}" data-editor-query /><button class="primary-button compact" data-add-entry>${isItems ? "設計図を追加" : "ステージを追加"}</button></div>
       <div class="manage-list">${cards || '<div class="empty-state"><strong>該当するデータがありません</strong></div>'}</div>
@@ -257,30 +281,29 @@ function itemEditorModal() {
   return `<div class="modal-backdrop" data-close-modal><section class="modal-sheet form-sheet" role="dialog" aria-modal="true" data-modal-panel><div class="modal-handle"></div><div class="modal-header"><div><small>BLUEPRINT DATA</small><h2>${
     item ? "設計図を編集" : "設計図を追加"
   }</h2></div><button class="icon-button" data-close-modal>×</button></div>
-    <form data-item-form><label>設計図名<input name="name" required maxlength="80" value="${escapeHtml(
-      item?.name ?? "",
-    )}" /></label><div class="two-columns"><label>ランク<input name="rank" type="number" min="1" step="1" value="${
+    <form data-item-form><label>ランク<input name="rank" type="number" inputmode="numeric" min="1" step="1" value="${
       item?.rank ?? ""
-    }" /></label><label>表示順<input name="sortOrder" type="number" step="1" value="${item?.sortOrder ?? 0}" /></label></div>
+    }" placeholder="未設定も可" /></label>
     <label>装備分類<input name="category" list="category-list" maxlength="40" value="${escapeHtml(
       item?.category ?? "",
-    )}" /></label><datalist id="category-list">${Object.values(ITEM_CATEGORIES)
+    )}" placeholder="未設定も可" /></label><datalist id="category-list">${CATEGORY_ORDER
       .map((category) => `<option value="${escapeHtml(category)}"></option>`)
       .join("")}</datalist>
     <label>アイコン画像<input name="icon" type="file" accept="image/png,image/jpeg,image/webp" /></label>${
       item?.icon ? '<label class="check-label"><input name="removeIcon" type="checkbox" />登録画像を削除する</label>' : ""
-    }<button class="primary-button full" type="submit">保存する</button></form>
+    }<p class="form-error" data-item-form-error></p><button class="primary-button full" type="submit">保存する</button></form>
   </section></div>`;
 }
 
 function stageEditorModal() {
   const draft = state.modal.draft;
-  const itemOptions = state.masterData.items
+  const sortedItems = [...state.masterData.items].sort(compareItems);
+  const itemOptions = sortedItems
     .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`)
     .join("");
   const dropRows = draft.drops
     .map(
-      (drop, index) => `<div class="drop-edit-row"><select data-drop-item="${index}">${state.masterData.items
+      (drop, index) => `<div class="drop-edit-row"><select data-drop-item="${index}">${sortedItems
         .map(
           (item) =>
             `<option value="${escapeHtml(item.id)}" ${drop.itemId === item.id ? "selected" : ""}>${escapeHtml(
@@ -296,9 +319,11 @@ function stageEditorModal() {
   return `<div class="modal-backdrop" data-close-modal><section class="modal-sheet form-sheet" role="dialog" aria-modal="true" data-modal-panel><div class="modal-handle"></div><div class="modal-header"><div><small>STAGE DATA</small><h2>${
     state.modal.stageId ? "ステージを編集" : "ステージを追加"
   }</h2></div><button class="icon-button" data-close-modal>×</button></div>
-    <form data-stage-form><label>ステージ名<input required maxlength="30" value="${escapeHtml(
-      draft.name,
-    )}" data-stage-name /></label><label>表示順<input type="number" step="1" value="${draft.sortOrder}" data-stage-sort /></label><fieldset><legend>ドロップ</legend><div class="drop-edit-list">${dropRows}</div><button type="button" class="secondary-button full" data-add-drop>ドロップを追加</button></fieldset><p class="form-error" data-form-error></p><button class="primary-button full" type="submit">保存する</button></form>
+    <form data-stage-form><div class="two-columns"><label>章番号<input required type="number" inputmode="numeric" min="1" step="1" value="${escapeHtml(
+      draft.chapter,
+    )}" data-stage-chapter /></label><label>ステージ番号<input required type="number" inputmode="numeric" min="1" step="1" value="${escapeHtml(
+      draft.number,
+    )}" data-stage-number /></label></div><fieldset><legend>ドロップ</legend><div class="drop-edit-list">${dropRows}</div><button type="button" class="secondary-button full" data-add-drop>ドロップを追加</button></fieldset><p class="form-error" data-form-error></p><button class="primary-button full" type="submit">保存する</button></form>
   </section></div>`;
 }
 
@@ -338,17 +363,17 @@ function closeModal() {
 
 function makeStageDraft(stage) {
   return stage
-    ? { name: stage.name, sortOrder: stage.sortOrder, drops: structuredClone(stage.drops) }
+    ? { chapter: stage.chapter, number: stage.number, drops: structuredClone(stage.drops) }
     : {
-        name: "",
-        sortOrder: 0,
+        chapter: "",
+        number: "",
         drops: [{ itemId: state.masterData.items[0]?.id ?? "", quantity: 1 }],
       };
 }
 
 function updateStageDraftFromElement(target) {
-  if (target.matches("[data-stage-name]")) state.modal.draft.name = target.value;
-  if (target.matches("[data-stage-sort]")) state.modal.draft.sortOrder = Number(target.value);
+  if (target.matches("[data-stage-chapter]")) state.modal.draft.chapter = target.value;
+  if (target.matches("[data-stage-number]")) state.modal.draft.number = target.value;
   if (target.matches("[data-drop-item]")) state.modal.draft.drops[Number(target.dataset.dropItem)].itemId = target.value;
   if (target.matches("[data-drop-quantity]")) {
     state.modal.draft.drops[Number(target.dataset.dropQuantity)].quantity = Number(target.value);
@@ -358,10 +383,11 @@ function updateStageDraftFromElement(target) {
 async function persistMaster(message) {
   try {
     state.masterData = await saveMasterData(state.masterData);
-    state.result = null;
-    closeModal();
+    state.modal = null;
+    queueCalculation();
     showToast(message);
   } catch (error) {
+    stopPendingCalculation();
     state.masterData = await loadMasterData();
     render();
     showToast(`保存できませんでした：${error.message}`);
@@ -385,7 +411,14 @@ function readImage(file) {
 async function handleItemSubmit(form) {
   const formData = new FormData(form);
   const existing = state.modal.itemId ? getItem(state.modal.itemId) : null;
-  const rankValue = formData.get("rank");
+  const rankText = String(formData.get("rank") ?? "").trim();
+  const rank = rankText ? Number(rankText) : null;
+  const category = String(formData.get("category") ?? "").trim();
+  if (rank != null && (!Number.isInteger(rank) || rank < 1)) throw new Error("ランクは1以上の整数で入力してください。");
+  const identityKey = itemIdentityKey({ rank, category });
+  if (state.masterData.items.some((item) => item.id !== existing?.id && itemIdentityKey(item) === identityKey)) {
+    throw new Error("同じランクと装備分類の設計図がすでに登録されています。");
+  }
   const now = new Date().toISOString();
   let icon = existing?.icon ?? null;
   if (formData.get("removeIcon")) icon = null;
@@ -395,15 +428,13 @@ async function handleItemSubmit(form) {
   const item = {
     id: existing?.id ?? `item-${crypto.randomUUID()}`,
     code: existing?.code ?? null,
-    name: String(formData.get("name")).trim(),
-    rank: rankValue ? Number(rankValue) : null,
-    category: String(formData.get("category") ?? "").trim(),
+    name: deriveItemName({ rank, category }),
+    rank,
+    category,
     icon,
-    sortOrder: Number(formData.get("sortOrder")),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
-  if (!item.name) throw new Error("設計図名を入力してください。");
 
   if (existing) {
     state.masterData.items = state.masterData.items.map((entry) => (entry.id === item.id ? item : entry));
@@ -418,8 +449,10 @@ async function handleStageSubmit() {
   const existing = state.modal.stageId
     ? state.masterData.stages.find((stage) => stage.id === state.modal.stageId)
     : null;
-  const name = draft.name.trim();
-  if (!name) throw new Error("ステージ名を入力してください。");
+  const chapter = Number(draft.chapter);
+  const number = Number(draft.number);
+  if (!Number.isInteger(chapter) || chapter < 1) throw new Error("章番号は1以上の整数で入力してください。");
+  if (!Number.isInteger(number) || number < 1) throw new Error("ステージ番号は1以上の整数で入力してください。");
   if (draft.drops.length === 0) throw new Error("ドロップを1件以上追加してください。");
   if (draft.drops.some((drop) => !drop.itemId || !Number.isInteger(drop.quantity) || drop.quantity < 1)) {
     throw new Error("ドロップと1周あたりの個数を正しく入力してください。");
@@ -427,16 +460,18 @@ async function handleStageSubmit() {
   if (new Set(draft.drops.map((drop) => drop.itemId)).size !== draft.drops.length) {
     throw new Error("同じ設計図を重複して登録できません。");
   }
-  if (state.masterData.stages.some((stage) => stage.id !== existing?.id && stage.name === name)) {
-    throw new Error("同じステージ名がすでに登録されています。");
+  const identityKey = stageIdentityKey({ chapter, number });
+  if (state.masterData.stages.some((stage) => stage.id !== existing?.id && stageIdentityKey(stage) === identityKey)) {
+    throw new Error("同じ章番号とステージ番号がすでに登録されています。");
   }
 
   const now = new Date().toISOString();
   const stage = {
     id: existing?.id ?? `stage-${crypto.randomUUID()}`,
-    name,
+    chapter,
+    number,
+    name: deriveStageName({ chapter, number }),
     drops: structuredClone(draft.drops),
-    sortOrder: Number.isInteger(draft.sortOrder) ? draft.sortOrder : 0,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
@@ -448,23 +483,35 @@ async function handleStageSubmit() {
   await persistMaster(existing ? "ステージを更新しました。" : "ステージを追加しました。");
 }
 
-function calculate() {
-  if (!validateRequests() || state.busy) return;
-  state.busy = true;
-  state.result = null;
+function stopPendingCalculation() {
+  if (state.calculationTimer) window.clearTimeout(state.calculationTimer);
+  state.calculationTimer = null;
+  state.worker?.terminate();
+  state.worker = null;
+  state.busy = false;
+}
+
+function runCalculation() {
+  state.calculationTimer = null;
+  if (!validateRequests()) {
+    state.busy = false;
+    state.result = null;
+    render();
+    return;
+  }
   const worker = new Worker(new URL("./optimizer.worker.js", import.meta.url), { type: "module" });
   state.worker = worker;
   const requestId = crypto.randomUUID();
   worker.addEventListener("message", (event) => {
-    if (event.data.requestId !== requestId) return;
+    if (event.data.requestId !== requestId || state.worker !== worker) return;
     state.result = event.data.result;
     state.busy = false;
     state.worker = null;
     worker.terminate();
     render();
-    document.querySelector("#calculation-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   worker.addEventListener("error", (event) => {
+    if (state.worker !== worker) return;
     state.result = { status: "error", message: event.message };
     state.busy = false;
     state.worker = null;
@@ -477,6 +524,15 @@ function calculate() {
     stages: state.masterData.stages,
     timeoutMs: 2800,
   });
+}
+
+function queueCalculation() {
+  stopPendingCalculation();
+  state.result = null;
+  if (validateRequests()) {
+    state.busy = true;
+    state.calculationTimer = window.setTimeout(runCalculation, 180);
+  }
   render();
 }
 
@@ -490,6 +546,9 @@ function bindEvents() {
     }),
   );
   document.querySelector("[data-open-selector]")?.addEventListener("click", () => {
+    state.selector.ranks = [];
+    state.selector.categories = [];
+    state.selector.draftIds = [];
     state.modal = { type: "selector" };
     render();
   });
@@ -506,49 +565,54 @@ function bindEvents() {
     input.addEventListener("input", () => {
       const request = state.requests.find((entry) => entry.itemId === input.dataset.quantityId);
       request.quantity = input.value;
-      state.result = null;
-      render();
+      queueCalculation();
       document.querySelector(`[data-quantity-id="${CSS.escape(request.itemId)}"]`)?.focus();
     }),
   );
   document.querySelectorAll("[data-remove-request]").forEach((button) =>
     button.addEventListener("click", () => {
       state.requests = state.requests.filter((request) => request.itemId !== button.dataset.removeRequest);
-      state.result = null;
+      queueCalculation();
+    }),
+  );
+
+  document.querySelectorAll("[data-filter-rank]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const value = button.dataset.filterRank;
+      state.selector.ranks = state.selector.ranks.includes(value)
+        ? state.selector.ranks.filter((entry) => entry !== value)
+        : [...state.selector.ranks, value];
       render();
     }),
   );
-  document.querySelector("[data-calculate]")?.addEventListener("click", calculate);
-  document.querySelector("[data-cancel]")?.addEventListener("click", () => {
-    state.worker?.terminate();
-    state.worker = null;
-    state.busy = false;
-    state.result = { status: "cancelled" };
-    render();
-  });
-
-  document.querySelector("[data-selector-query]")?.addEventListener("input", (event) => {
-    state.selector.query = event.target.value;
-    render();
-    const input = document.querySelector("[data-selector-query]");
-    input?.focus();
-    input?.setSelectionRange(input.value.length, input.value.length);
-  });
-  document.querySelector("[data-selector-rank]")?.addEventListener("change", (event) => {
-    state.selector.rank = event.target.value;
-    render();
-  });
-  document.querySelector("[data-selector-category]")?.addEventListener("change", (event) => {
-    state.selector.category = event.target.value;
-    render();
-  });
+  document.querySelectorAll("[data-filter-category]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const value = button.dataset.filterCategory;
+      state.selector.categories = state.selector.categories.includes(value)
+        ? state.selector.categories.filter((entry) => entry !== value)
+        : [...state.selector.categories, value];
+      render();
+    }),
+  );
   document.querySelectorAll("[data-select-item]").forEach((button) =>
     button.addEventListener("click", () => {
-      state.requests.push({ itemId: button.dataset.selectItem, quantity: "1" });
-      state.modal = null;
+      const itemId = button.dataset.selectItem;
+      state.selector.draftIds = state.selector.draftIds.includes(itemId)
+        ? state.selector.draftIds.filter((entry) => entry !== itemId)
+        : [...state.selector.draftIds, itemId];
       render();
     }),
   );
+  document.querySelector("[data-confirm-selection]")?.addEventListener("click", () => {
+    const existingIds = new Set(state.requests.map((request) => request.itemId));
+    state.selector.draftIds.forEach((itemId) => {
+      if (!existingIds.has(itemId)) state.requests.push({ itemId, quantity: "1" });
+    });
+    state.requests.sort((a, b) => compareItems(getItem(a.itemId), getItem(b.itemId)));
+    state.selector.draftIds = [];
+    state.modal = null;
+    queueCalculation();
+  });
 
   document.querySelectorAll("[data-edit-section]").forEach((button) =>
     button.addEventListener("click", () => {
@@ -595,6 +659,7 @@ function bindEvents() {
       }
       if (!window.confirm(`「${item.name}」を削除しますか？`)) return;
       state.masterData.items = state.masterData.items.filter((entry) => entry.id !== item.id);
+      state.requests = state.requests.filter((request) => request.itemId !== item.id);
       await persistMaster("設計図を削除しました。");
     }),
   );
@@ -608,6 +673,7 @@ function bindEvents() {
   );
   document.querySelector("[data-reset-master]")?.addEventListener("click", async () => {
     if (!window.confirm("編集した設計図、ステージ、登録画像を削除して初期データへ戻しますか？")) return;
+    stopPendingCalculation();
     state.masterData = await resetMasterData();
     state.requests = [];
     state.result = null;
@@ -619,7 +685,8 @@ function bindEvents() {
     try {
       await handleItemSubmit(event.currentTarget);
     } catch (error) {
-      showToast(error.message);
+      const output = document.querySelector("[data-item-form-error]");
+      if (output) output.textContent = error.message;
     }
   });
   document.querySelector("[data-stage-form]")?.addEventListener("input", (event) => updateStageDraftFromElement(event.target));
@@ -655,6 +722,7 @@ function bindEvents() {
       const restored = parseBackup(await file.text());
       if (!window.confirm("現在のマスターデータを、選択したバックアップで置き換えますか？")) return;
       await saveMasterData(restored);
+      stopPendingCalculation();
       state.masterData = restored;
       state.requests = [];
       state.result = null;

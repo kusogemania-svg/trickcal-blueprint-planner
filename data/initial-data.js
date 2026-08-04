@@ -1,14 +1,16 @@
+import { CATEGORY_ORDER, compareItems, compareStages, deriveItemName, deriveStageName } from "../src/core/catalog.js";
+
 const SOURCE_UPDATED_AT = "2026-08-01T06:56:23+09:00";
 const CREATED_AT = "2026-08-04T00:00:00.000Z";
 
 export const ITEM_CATEGORIES = Object.freeze({
-  1: "鎧",
-  2: "帽子",
-  3: "リング",
-  4: "ブーツ",
-  5: "ネックレス",
-  6: "剣",
-  7: "杖",
+  1: CATEGORY_ORDER[0],
+  2: CATEGORY_ORDER[2],
+  3: CATEGORY_ORDER[3],
+  4: CATEGORY_ORDER[4],
+  5: CATEGORY_ORDER[1],
+  6: CATEGORY_ORDER[5],
+  7: CATEGORY_ORDER[6],
 });
 
 const STAGE_DROP_TSV = `30-10\t83,94
@@ -300,11 +302,10 @@ function makeItem(code) {
   return {
     id: `item-${code}`,
     code: String(code),
-    name: `ランク${rank} ${category}`,
+    name: deriveItemName({ rank, category }),
     rank,
     category,
     icon: null,
-    sortOrder: rank * 100 + categoryCode,
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
   };
@@ -318,19 +319,22 @@ function parseInitialData() {
     codes.forEach((code) => itemCodes.add(code));
     const [chapter, number] = name.split("-").map(Number);
 
-    return {
+    const stage = {
       id: `stage-${name}`,
-      name,
+      chapter,
+      number,
       drops: codes.map((code) => ({ itemId: `item-${code}`, quantity: 1 })),
-      sortOrder: chapter * 100 + number,
       createdAt: CREATED_AT,
       updatedAt: CREATED_AT,
     };
+    return { ...stage, name: deriveStageName(stage) };
   });
 
   const items = [...itemCodes]
     .map(makeItem)
-    .sort((a, b) => b.sortOrder - a.sortOrder || a.name.localeCompare(b.name, "ja"));
+    .sort(compareItems);
+
+  stages.sort(compareStages);
 
   return {
     schemaVersion: 1,
