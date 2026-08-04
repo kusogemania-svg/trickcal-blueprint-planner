@@ -19,10 +19,19 @@ export function normalizeMasterData(masterData) {
     if (!item || typeof item !== "object") return item;
     const category = CATEGORY_RENAMES[item.category] ?? item.category;
     const name = deriveItemName({ ...item, category });
-    const normalizedItem = { ...item, category, name };
+    const code = String(item.code ?? "");
+    const defaultIconPath = item.defaultIconPath ?? (/^[2-9][1-7]$/.test(code) ? `./blueprint-icons/${code}.webp` : null);
+    const normalizedItem = { ...item, category, name, defaultIconPath };
     if ("sortOrder" in normalizedItem) delete normalizedItem.sortOrder;
 
-    if (category === item.category && name === item.name && !("sortOrder" in item)) return item;
+    if (
+      category === item.category &&
+      name === item.name &&
+      defaultIconPath === item.defaultIconPath &&
+      !("sortOrder" in item)
+    ) {
+      return item;
+    }
     changed = true;
     return normalizedItem;
   });

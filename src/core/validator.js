@@ -47,6 +47,9 @@ export function validateMasterData(data) {
         errors.push(`${label}のアイコン画像が不正です。`);
       }
     }
+    if (item?.defaultIconPath != null && !/^\.\/blueprint-icons\/\d+\.webp$/.test(item.defaultIconPath)) {
+      errors.push(`${label}の初期アイコンパスが不正です。`);
+    }
   }
 
   const stageIds = data.stages.map((stage) => stage?.id);

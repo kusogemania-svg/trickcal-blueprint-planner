@@ -306,6 +306,7 @@ function makeItem(code) {
     rank,
     category,
     icon: null,
+    defaultIconPath: `./blueprint-icons/${code}.webp`,
     createdAt: CREATED_AT,
     updatedAt: CREATED_AT,
   };

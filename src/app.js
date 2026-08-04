@@ -51,8 +51,9 @@ function getItem(itemId) {
 }
 
 function itemIcon(item, className = "item-icon") {
-  if (item?.icon?.data) {
-    return `<span class="${className}"><img src="${escapeHtml(item.icon.data)}" alt="" /></span>`;
+  const iconSource = item?.icon?.data ?? item?.defaultIconPath;
+  if (iconSource) {
+    return `<span class="${className}"><img src="${escapeHtml(iconSource)}" alt="" loading="lazy" /></span>`;
   }
   return `<span class="${className} fallback-icon rank-${item?.rank ?? "x"}" aria-hidden="true">${escapeHtml(
     categoryGlyphs[item?.category] ?? "設",

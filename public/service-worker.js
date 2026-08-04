@@ -1,4 +1,7 @@
-const CACHE_VERSION = "trickcal-blueprint-v3";
+const CACHE_VERSION = "trickcal-blueprint-v4";
+const BLUEPRINT_ICON_CODES = Array.from({ length: 8 }, (_, rankIndex) =>
+  Array.from({ length: 7 }, (_, categoryIndex) => `${rankIndex + 2}${categoryIndex + 1}`),
+).flat();
 const APP_FILES = [
   "./",
   "./index.html",
@@ -14,7 +17,8 @@ const APP_FILES = [
   "./src/core/storage.js",
   "./src/core/validator.js",
   "./icons/icon-192.png",
-  "./icons/icon-512.png"
+  "./icons/icon-512.png",
+  ...BLUEPRINT_ICON_CODES.map((code) => `./blueprint-icons/${code}.webp`),
 ];
 
 self.addEventListener("install", (event) => {

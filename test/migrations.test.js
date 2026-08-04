@@ -22,6 +22,10 @@ test("保存済みの初期設計図名を新しい表記へ移行する", () =>
     ],
   );
   assert.deepEqual(
+    migrated.data.items.map((item) => item.defaultIconPath),
+    ["./blueprint-icons/83.webp", "./blueprint-icons/75.webp"],
+  );
+  assert.deepEqual(
     [migrated.data.stages[0].chapter, migrated.data.stages[0].number, migrated.data.stages[0].name],
     [12, 3, "12-3"],
   );

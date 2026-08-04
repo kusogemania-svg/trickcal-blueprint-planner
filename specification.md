@@ -326,6 +326,7 @@ trickcal-blueprint-backup-2026-08-04.json
   "name": "ランク8 鎧",
   "rank": 8,
   "category": "鎧",
+  "defaultIconPath": "./blueprint-icons/81.webp",
   "icon": {
     "mimeType": "image/webp",
     "data": "base64 encoded data"
@@ -468,6 +469,8 @@ trickcal-blueprint-backup-2026-08-04.json
 - 初期データ作成後、元表の全ステージ件数とアプリデータ件数を照合する。
 - 各ステージについて、設計図と副産物の両方が正しく対応していることを検証する。
 - 初期アイコンを同梱する場合は、ファイル名と設計図IDの対応を検証する。
+- 初期設計図には参照Wiki掲載のWebPアイコンを設計図コード単位で同梱し、オフラインキャッシュへ含める。
+- 利用者が登録した画像がある場合は登録画像を優先し、削除すると同梱アイコンへ戻す。
 - Wikiの更新は自動反映せず、データ編集または新しい初期データのリリースで対応する。
 
 ## 14. 実装マイルストーン
