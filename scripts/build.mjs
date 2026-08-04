@@ -1,5 +1,6 @@
 import { deflateSync } from "node:zlib";
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -85,6 +86,31 @@ const iconDirectory = join(outputDirectory, "icons");
 await mkdir(iconDirectory, { recursive: true });
 await Promise.all(
   [192, 512].map((size) => writeFile(join(iconDirectory, `icon-${size}.png`), createAppIcon(size))),
+);
+
+async function listFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...(await listFiles(path)));
+    else files.push(path);
+  }
+  return files;
+}
+
+const serviceWorkerPath = join(outputDirectory, "service-worker.js");
+const contentHash = createHash("sha256");
+const cacheFiles = (await listFiles(outputDirectory)).filter((path) => path !== serviceWorkerPath).sort();
+for (const path of cacheFiles) {
+  contentHash.update(path.slice(outputDirectory.length));
+  contentHash.update(await readFile(path));
+}
+const cacheVersion = `trickcal-blueprint-${contentHash.digest("hex").slice(0, 12)}`;
+const serviceWorkerSource = await readFile(serviceWorkerPath, "utf8");
+await writeFile(
+  serviceWorkerPath,
+  serviceWorkerSource.replace('const CACHE_VERSION = "trickcal-blueprint-build";', `const CACHE_VERSION = "${cacheVersion}";`),
 );
 
 console.log(`Built static site in ${outputDirectory}`);

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "trickcal-blueprint-v4";
+const CACHE_VERSION = "trickcal-blueprint-build";
 const BLUEPRINT_ICON_CODES = Array.from({ length: 8 }, (_, rankIndex) =>
   Array.from({ length: 7 }, (_, categoryIndex) => `${rankIndex + 2}${categoryIndex + 1}`),
 ).flat();

@@ -21,6 +21,7 @@ const state = {
   busy: false,
   worker: null,
   calculationTimer: null,
+  focusedQuantityId: null,
   modal: null,
   selector: { ranks: [], categories: [], draftIds: [] },
   editorQuery: "",
@@ -95,7 +96,7 @@ function renderRequestRow(request) {
     <div class="request-name"><strong>${escapeHtml(item?.name ?? "削除された設計図")}</strong><small>${escapeHtml(
       item?.category ?? "分類なし",
     )}</small></div>
-    <label class="quantity-field"><span>必要数</span><input type="number" inputmode="numeric" min="1" max="999" step="1" value="${escapeHtml(
+    <label class="quantity-field"><span>必要数</span><input type="text" inputmode="numeric" pattern="[0-9]*" maxlength="3" autocomplete="off" value="${escapeHtml(
       quantity,
     )}" data-quantity-id="${escapeHtml(request.itemId)}" aria-label="${escapeHtml(item?.name)}の必要数" /></label>
     <button class="icon-button danger" data-remove-request="${escapeHtml(request.itemId)}" aria-label="${escapeHtml(
@@ -355,6 +356,13 @@ function render() {
     state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""
   }${renderModal()}`;
   bindEvents();
+  if (state.focusedQuantityId) {
+    const input = document.querySelector(`[data-quantity-id="${CSS.escape(state.focusedQuantityId)}"]`);
+    if (input) {
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+    }
+  }
 }
 
 function closeModal() {
@@ -563,12 +571,29 @@ function bindEvents() {
   document.querySelectorAll("[data-modal-panel]").forEach((panel) => panel.addEventListener("click", (event) => event.stopPropagation()));
 
   document.querySelectorAll("[data-quantity-id]").forEach((input) =>
-    input.addEventListener("input", () => {
-      const request = state.requests.find((entry) => entry.itemId === input.dataset.quantityId);
-      request.quantity = input.value;
-      queueCalculation();
-      document.querySelector(`[data-quantity-id="${CSS.escape(request.itemId)}"]`)?.focus();
-    }),
+    {
+      input.addEventListener("focus", () => {
+        state.focusedQuantityId = input.dataset.quantityId;
+      });
+      input.addEventListener("input", () => {
+        const request = state.requests.find((entry) => entry.itemId === input.dataset.quantityId);
+        input.value = input.value.replace(/[^0-9]/g, "").slice(0, 3);
+        request.quantity = input.value;
+        state.focusedQuantityId = request.itemId;
+        queueCalculation();
+      });
+      input.addEventListener("blur", () => {
+        const quantityId = input.dataset.quantityId;
+        window.setTimeout(() => {
+          if (
+            state.focusedQuantityId === quantityId &&
+            document.activeElement?.dataset.quantityId !== quantityId
+          ) {
+            state.focusedQuantityId = null;
+          }
+        }, 0);
+      });
+    },
   );
   document.querySelectorAll("[data-remove-request]").forEach((button) =>
     button.addEventListener("click", () => {

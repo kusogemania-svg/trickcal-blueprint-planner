@@ -106,6 +106,173 @@ function makeGreedyPlan(demands, candidates) {
   return { totalRuns, counts };
 }
 
+function findMaximumMatching(graph) {
+  const vertexCount = graph.length;
+  const match = Array(vertexCount).fill(-1);
+  const parent = Array(vertexCount).fill(-1);
+  const base = Array.from({ length: vertexCount }, (_, index) => index);
+  const used = Array(vertexCount).fill(false);
+  const blossom = Array(vertexCount).fill(false);
+
+  function lowestCommonAncestor(first, second) {
+    const seen = Array(vertexCount).fill(false);
+    while (true) {
+      first = base[first];
+      seen[first] = true;
+      if (match[first] === -1) break;
+      first = parent[match[first]];
+    }
+    while (true) {
+      second = base[second];
+      if (seen[second]) return second;
+      second = parent[match[second]];
+    }
+  }
+
+  function markPath(vertex, blossomBase, child) {
+    while (base[vertex] !== blossomBase) {
+      blossom[base[vertex]] = true;
+      blossom[base[match[vertex]]] = true;
+      parent[vertex] = child;
+      child = match[vertex];
+      vertex = parent[match[vertex]];
+    }
+  }
+
+  function findAugmentingPath(root) {
+    used.fill(false);
+    parent.fill(-1);
+    for (let index = 0; index < vertexCount; index += 1) base[index] = index;
+
+    const queue = [root];
+    used[root] = true;
+    for (let head = 0; head < queue.length; head += 1) {
+      const vertex = queue[head];
+      for (const neighbor of graph[vertex]) {
+        if (base[vertex] === base[neighbor] || match[vertex] === neighbor) continue;
+
+        if (neighbor === root || (match[neighbor] !== -1 && parent[match[neighbor]] !== -1)) {
+          const blossomBase = lowestCommonAncestor(vertex, neighbor);
+          blossom.fill(false);
+          markPath(vertex, blossomBase, neighbor);
+          markPath(neighbor, blossomBase, vertex);
+          for (let index = 0; index < vertexCount; index += 1) {
+            if (!blossom[base[index]]) continue;
+            base[index] = blossomBase;
+            if (!used[index]) {
+              used[index] = true;
+              queue.push(index);
+            }
+          }
+        } else if (parent[neighbor] === -1) {
+          parent[neighbor] = vertex;
+          if (match[neighbor] === -1) {
+            let current = neighbor;
+            while (current !== -1) {
+              const previous = parent[current];
+              const next = previous === -1 ? -1 : match[previous];
+              match[current] = previous;
+              if (previous !== -1) match[previous] = current;
+              current = next;
+            }
+            return true;
+          }
+          const matchedNeighbor = match[neighbor];
+          used[matchedNeighbor] = true;
+          queue.push(matchedNeighbor);
+        }
+      }
+    }
+    return false;
+  }
+
+  for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+    if (match[vertex] === -1) findAugmentingPath(vertex);
+  }
+  return match;
+}
+
+function makeUnitPairPlan(demands, candidates) {
+  const totalDemand = demands.reduce((sum, demand) => sum + demand, 0);
+  if (totalDemand > 600) return null;
+
+  const singletonCandidates = Array(demands.length).fill(-1);
+  const pairCandidates = new Map();
+  for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
+    const affectedItems = [];
+    for (let itemIndex = 0; itemIndex < demands.length; itemIndex += 1) {
+      const effect = candidates[candidateIndex].effects[itemIndex];
+      if (effect !== 0 && effect !== 1) return null;
+      if (effect === 1) affectedItems.push(itemIndex);
+    }
+    if (affectedItems.length === 1) singletonCandidates[affectedItems[0]] = candidateIndex;
+    else if (affectedItems.length === 2) pairCandidates.set(affectedItems.join(","), candidateIndex);
+    else return null;
+  }
+  if (singletonCandidates.some((candidateIndex) => candidateIndex === -1)) return null;
+
+  const cloneItems = [];
+  const itemClones = demands.map((demand, itemIndex) => {
+    const clones = [];
+    for (let count = 0; count < demand; count += 1) {
+      clones.push(cloneItems.length);
+      cloneItems.push(itemIndex);
+    }
+    return clones;
+  });
+  const graph = Array.from({ length: cloneItems.length }, () => []);
+  for (const key of pairCandidates.keys()) {
+    const [firstItem, secondItem] = key.split(",").map(Number);
+    for (const firstClone of itemClones[firstItem]) {
+      for (const secondClone of itemClones[secondItem]) {
+        graph[firstClone].push(secondClone);
+        graph[secondClone].push(firstClone);
+      }
+    }
+  }
+
+  const match = findMaximumMatching(graph);
+  const counts = Array(candidates.length).fill(0);
+  let matchedPairs = 0;
+  for (let clone = 0; clone < match.length; clone += 1) {
+    if (match[clone] === -1) {
+      counts[singletonCandidates[cloneItems[clone]]] += 1;
+    } else if (clone < match[clone]) {
+      const itemPair = [cloneItems[clone], cloneItems[match[clone]]].sort((a, b) => a - b).join(",");
+      counts[pairCandidates.get(itemPair)] += 1;
+      matchedPairs += 1;
+    }
+  }
+
+  return {
+    counts,
+    obtained: [...demands],
+    excess: 0,
+    stageTypes: counts.filter((count) => count > 0).length,
+    totalRuns: totalDemand - matchedPairs,
+  };
+}
+
+function formatResult(normalizedRequests, candidates, plan, totalRuns, exploredNodes) {
+  const stageRuns = plan.counts
+    .map((runs, index) => ({ stage: candidates[index].stage, runs }))
+    .filter((entry) => entry.runs > 0)
+    .sort((a, b) => b.runs - a.runs || compareStageNames(a.stage.name, b.stage.name));
+
+  return {
+    status: "ok",
+    totalRuns,
+    stageRuns,
+    itemResults: normalizedRequests.map((request, index) => ({
+      itemId: request.itemId,
+      required: request.quantity,
+      obtained: plan.obtained[index],
+      excess: plan.obtained[index] - request.quantity,
+    })),
+    exploredNodes,
+  };
+}
+
 function searchAtRunCount(demands, candidates, totalRuns, deadline, shouldAbort) {
   const counts = Array(candidates.length).fill(0);
   const obtained = Array(demands.length).fill(0);
@@ -114,10 +281,8 @@ function searchAtRunCount(demands, candidates, totalRuns, deadline, shouldAbort)
 
   function visit(candidateIndex, runsLeft, remaining, usedTypes) {
     exploredNodes += 1;
-    if ((exploredNodes & 1023) === 0) {
-      if (shouldAbort?.()) throw new DOMException("計算をキャンセルしました。", "AbortError");
-      if (Date.now() > deadline) throw new Error("TIMEOUT");
-    }
+    if (shouldAbort?.()) throw new DOMException("計算をキャンセルしました。", "AbortError");
+    if (Date.now() > deadline) throw new Error("TIMEOUT");
 
     const neededRuns = lowerBound(remaining, candidates, candidateIndex);
     if (!Number.isFinite(neededRuns) || neededRuns > runsLeft) return;
@@ -218,6 +383,13 @@ export function solveMinimumRuns({ requests, stages, timeoutMs = DEFAULT_TIMEOUT
   const greedy = makeGreedyPlan(demands, candidates);
   if (!greedy) return { status: "unavailable", unavailableItemIds: itemIds };
 
+  if (demands.reduce((sum, demand) => sum + demand, 0) >= 64) {
+    const unitPairPlan = makeUnitPairPlan(demands, candidates);
+    if (unitPairPlan) {
+      return formatResult(normalizedRequests, candidates, unitPairPlan, unitPairPlan.totalRuns, 0);
+    }
+  }
+
   const deadline = Date.now() + timeoutMs;
   const firstRunCount = lowerBound(demands, candidates);
   let totalExploredNodes = 0;
@@ -233,24 +405,7 @@ export function solveMinimumRuns({ requests, stages, timeoutMs = DEFAULT_TIMEOUT
       );
       totalExploredNodes += exploredNodes;
       if (!bestPlan) continue;
-
-      const stageRuns = bestPlan.counts
-        .map((runs, index) => ({ stage: candidates[index].stage, runs }))
-        .filter((entry) => entry.runs > 0)
-        .sort((a, b) => b.runs - a.runs || compareStageNames(a.stage.name, b.stage.name));
-
-      return {
-        status: "ok",
-        totalRuns: runCount,
-        stageRuns,
-        itemResults: normalizedRequests.map((request, index) => ({
-          itemId: request.itemId,
-          required: request.quantity,
-          obtained: bestPlan.obtained[index],
-          excess: bestPlan.obtained[index] - request.quantity,
-        })),
-        exploredNodes: totalExploredNodes,
-      };
+      return formatResult(normalizedRequests, candidates, bestPlan, runCount, totalExploredNodes);
     }
   } catch (error) {
     if (error?.name === "AbortError") return { status: "cancelled" };

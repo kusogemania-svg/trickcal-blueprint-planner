@@ -92,6 +92,38 @@ test("初期データの同時ドロップを実際のステージで利用す�
   assert.deepEqual(result.stageRuns.map((entry) => [entry.stage.name, entry.runs]), [["30-10", 3]]);
 });
 
+test("同一ランク6種類を各42個指定しても短時間で厳密解を返す", () => {
+  const data = createInitialData();
+  const requests = data.items
+    .filter((item) => item.rank === 8)
+    .slice(0, 6)
+    .map((item) => ({ itemId: item.id, quantity: 42 }));
+  const result = solveMinimumRuns({ requests, stages: data.stages });
+  assert.equal(result.status, "ok");
+  assert.equal(result.totalRuns, 126);
+  assert.equal(result.stageRuns.length, 3);
+  assert.deepEqual(
+    result.itemResults.map((entry) => entry.excess),
+    [0, 0, 0, 0, 0, 0],
+  );
+});
+
+test("全ランクの6種類組み合わせを各42個指定してもタイムアウトしない", () => {
+  const data = createInitialData();
+  for (const rank of [9, 8, 7, 6, 5, 4, 3, 2]) {
+    const rankItems = data.items.filter((item) => item.rank === rank);
+    for (let omitted = 0; omitted < rankItems.length; omitted += 1) {
+      const requests = rankItems
+        .filter((_, index) => index !== omitted)
+        .map((item) => ({ itemId: item.id, quantity: 42 }));
+      const result = solveMinimumRuns({ requests, stages: data.stages });
+      assert.equal(result.status, "ok", `ランク${rank}・除外${rankItems[omitted].category}`);
+      assert.ok(result.totalRuns >= 126 && result.totalRuns <= 252);
+      assert.ok(result.itemResults.every((entry) => entry.obtained >= entry.required));
+    }
+  }
+});
+
 test("入手手段のない設計図を報告する", () => {
   const result = solveMinimumRuns({
     requests: [{ itemId: "missing", quantity: 1 }],
