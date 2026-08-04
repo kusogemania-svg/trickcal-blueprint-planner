@@ -1,0 +1,699 @@
+import { ITEM_CATEGORIES } from "../data/initial-data.js";
+import { downloadBackup, parseBackup } from "./core/backup.js";
+import { loadMasterData, resetMasterData, saveMasterData } from "./core/storage.js";
+
+const app = document.querySelector("#app");
+
+const state = {
+  view: "planner",
+  editSection: "items",
+  masterData: null,
+  requests: [],
+  result: null,
+  busy: false,
+  worker: null,
+  modal: null,
+  selector: { query: "", rank: "", category: "" },
+  editorQuery: "",
+  toast: "",
+};
+
+const categoryGlyphs = {
+  鎧: "鎧",
+  帽子: "帽",
+  煌めく装飾品: "煌",
+  ブーツ: "靴",
+  華麗な装飾品: "華",
+  物理武器: "剣",
+  魔法武器: "杖",
+};
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function getItem(itemId) {
+  return state.masterData.items.find((item) => item.id === itemId);
+}
+
+function itemIcon(item, className = "item-icon") {
+  if (item?.icon?.data) {
+    return `<span class="${className}"><img src="${escapeHtml(item.icon.data)}" alt="" /></span>`;
+  }
+  return `<span class="${className} fallback-icon rank-${item?.rank ?? "x"}" aria-hidden="true">${escapeHtml(
+    categoryGlyphs[item?.category] ?? "設",
+  )}</span>`;
+}
+
+function showToast(message) {
+  state.toast = message;
+  render();
+  window.setTimeout(() => {
+    if (state.toast === message) {
+      state.toast = "";
+      render();
+    }
+  }, 3200);
+}
+
+function navButton(view, label, glyph) {
+  const active = state.view === view;
+  return `<button class="nav-button ${active ? "active" : ""}" data-view="${view}" aria-current="${
+    active ? "page" : "false"
+  }"><span aria-hidden="true">${glyph}</span><small>${label}</small></button>`;
+}
+
+function renderHeader() {
+  const labels = { planner: "最小周回を計算", editor: "データ編集", backup: "バックアップ" };
+  return `<header class="app-header">
+    <div class="app-title"><span class="mini-mark" aria-hidden="true">設</span><div><small>TRICKCAL TOOL</small><strong>${labels[state.view]}</strong></div></div>
+    <span class="local-badge">端末内保存</span>
+  </header>`;
+}
+
+function renderRequestRow(request) {
+  const item = getItem(request.itemId);
+  const quantity = String(request.quantity ?? "");
+  const valid = /^\d+$/.test(quantity) && Number(quantity) >= 1 && Number(quantity) <= 999;
+  return `<article class="request-row ${valid ? "" : "has-error"}">
+    ${itemIcon(item)}
+    <div class="request-name"><strong>${escapeHtml(item?.name ?? "削除された設計図")}</strong><small>${escapeHtml(
+      item?.category ?? "分類なし",
+    )}</small></div>
+    <label class="quantity-field"><span>必要数</span><input type="number" inputmode="numeric" min="1" max="999" step="1" value="${escapeHtml(
+      quantity,
+    )}" data-quantity-id="${escapeHtml(request.itemId)}" aria-label="${escapeHtml(item?.name)}の必要数" /></label>
+    <button class="icon-button danger" data-remove-request="${escapeHtml(request.itemId)}" aria-label="${escapeHtml(
+      item?.name,
+    )}を削除">×</button>
+    ${valid ? "" : '<p class="field-error">1〜999の整数を入力してください。</p>'}
+  </article>`;
+}
+
+function validateRequests() {
+  return (
+    state.requests.length > 0 &&
+    state.requests.every((request) => {
+      const quantity = Number(request.quantity);
+      return Number.isInteger(quantity) && quantity >= 1 && quantity <= 999;
+    })
+  );
+}
+
+function renderResult() {
+  if (!state.result) return "";
+  if (state.result.status !== "ok") {
+    const messages = {
+      timeout: "計算時間の上限を超えました。条件を減らしてもう一度お試しください。",
+      cancelled: "計算をキャンセルしました。",
+      invalid: state.result.message,
+      error: state.result.message ?? "計算中にエラーが発生しました。",
+      unavailable: `入手できるステージがない設計図があります：${state.result.unavailableItemIds
+        .map((id) => getItem(id)?.name ?? id)
+        .join("、")}`,
+    };
+    return `<section class="result-panel error-panel"><h2>計算できませんでした</h2><p>${escapeHtml(
+      messages[state.result.status] ?? "不明なエラーです。",
+    )}</p></section>`;
+  }
+
+  const stageCards = state.result.stageRuns
+    .map(({ stage, runs }) => {
+      const drops = stage.drops
+        .map((drop) => {
+          const item = getItem(drop.itemId);
+          return `<li>${itemIcon(item, "tiny-icon")}<span>${escapeHtml(item?.name ?? drop.itemId)}</span><strong>×${
+            drop.quantity * runs
+          }</strong></li>`;
+        })
+        .join("");
+      return `<article class="stage-card"><div class="stage-number"><small>STAGE</small><strong>${escapeHtml(
+        stage.name,
+      )}</strong></div><div class="run-count"><strong>${runs}</strong><span>周</span></div><ul>${drops}</ul></article>`;
+    })
+    .join("");
+
+  const itemRows = state.result.itemResults
+    .map((entry) => {
+      const item = getItem(entry.itemId);
+      return `<tr><td>${itemIcon(item, "tiny-icon")}<span>${escapeHtml(item?.name ?? entry.itemId)}</span></td><td>${
+        entry.required
+      }</td><td>${entry.obtained}</td><td class="${entry.excess > 0 ? "excess" : ""}">+${entry.excess}</td></tr>`;
+    })
+    .join("");
+
+  return `<section class="result-panel" id="calculation-result">
+    <div class="result-hero"><div><small>MINIMUM ROUTE</small><h2>最小周回ルート</h2></div><div class="total-runs"><strong>${state.result.totalRuns}</strong><span>周</span></div></div>
+    <h3>ステージ別</h3><div class="stage-list">${stageCards}</div>
+    <h3>獲得内訳</h3><div class="table-scroll"><table><thead><tr><th>設計図</th><th>必要</th><th>獲得</th><th>余剰</th></tr></thead><tbody>${itemRows}</tbody></table></div>
+  </section>`;
+}
+
+function renderPlanner() {
+  const valid = validateRequests();
+  return `<main class="main-content planner-content">
+    <section class="intro-card"><p class="eyebrow">100% DROP SIMULATION</p><h1>欲しい設計図を<br />いちばん少ない周回で。</h1><p>設計図と必要数を選ぶと、副産物まで含めた最短ルートを計算します。</p><div class="assumption-chip">1周で登録ドロップを各1個獲得</div></section>
+    <section class="request-section"><div class="section-heading"><div><small>STEP 1</small><h2>必要な設計図</h2></div><span>${state.requests.length}件</span></div>
+      <div class="request-list">${
+        state.requests.length > 0
+          ? state.requests.map(renderRequestRow).join("")
+          : '<div class="empty-state"><span aria-hidden="true">＋</span><strong>設計図を追加してください</strong><p>複数種類をまとめて選べます。</p></div>'
+      }</div>
+      <button class="secondary-button full" data-open-selector>設計図を追加</button>
+    </section>
+    ${renderResult()}
+    <div class="calculate-dock"><button class="primary-button" data-calculate ${valid && !state.busy ? "" : "disabled"}>${
+      state.busy ? "計算しています…" : "最小周回を計算"
+    }</button>${state.busy ? '<button class="text-button" data-cancel>キャンセル</button>' : ""}</div>
+  </main>`;
+}
+
+function renderItemSelector() {
+  const selectedIds = new Set(state.requests.map((request) => request.itemId));
+  const ranks = [...new Set(state.masterData.items.map((item) => item.rank).filter(Boolean))].sort((a, b) => b - a);
+  const categories = [...new Set(state.masterData.items.map((item) => item.category).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, "ja"),
+  );
+  const query = state.selector.query.toLowerCase();
+  const filtered = state.masterData.items.filter(
+    (item) =>
+      (!query || item.name.toLowerCase().includes(query)) &&
+      (!state.selector.rank || String(item.rank) === state.selector.rank) &&
+      (!state.selector.category || item.category === state.selector.category),
+  );
+
+  return `<div class="modal-backdrop" data-close-modal><section class="modal-sheet selector-sheet" role="dialog" aria-modal="true" aria-labelledby="selector-title" data-modal-panel>
+    <div class="modal-handle"></div><div class="modal-header"><div><small>SELECT BLUEPRINT</small><h2 id="selector-title">設計図を選択</h2></div><button class="icon-button" data-close-modal aria-label="閉じる">×</button></div>
+    <div class="selector-filters"><input type="search" placeholder="名称で検索" value="${escapeHtml(
+      state.selector.query,
+    )}" data-selector-query /><div class="filter-row"><select data-selector-rank><option value="">すべてのランク</option>${ranks
+      .map((rank) => `<option value="${rank}" ${state.selector.rank === String(rank) ? "selected" : ""}>ランク${rank}</option>`)
+      .join("")}</select><select data-selector-category><option value="">すべての分類</option>${categories
+      .map(
+        (category) =>
+          `<option value="${escapeHtml(category)}" ${state.selector.category === category ? "selected" : ""}>${escapeHtml(
+            category,
+          )}</option>`,
+      )
+      .join("")}</select></div></div>
+    <div class="item-grid">${filtered
+      .map((item) => {
+        const selected = selectedIds.has(item.id);
+        return `<button class="item-choice ${selected ? "selected" : ""}" data-select-item="${escapeHtml(item.id)}" ${
+          selected ? "disabled" : ""
+        }>${itemIcon(item)}<span><small>RANK ${item.rank ?? "-"}</small><strong>${escapeHtml(item.category || item.name)}</strong></span>${
+          selected ? '<em>選択済み</em>' : ""
+        }</button>`;
+      })
+      .join("")}</div>
+  </section></div>`;
+}
+
+function renderEditor() {
+  const isItems = state.editSection === "items";
+  const query = state.editorQuery.toLowerCase();
+  const entries = (isItems ? state.masterData.items : state.masterData.stages).filter((entry) =>
+    entry.name.toLowerCase().includes(query),
+  );
+  const cards = entries
+    .map((entry) => {
+      if (isItems) {
+        return `<article class="manage-row">${itemIcon(entry)}<div><strong>${escapeHtml(entry.name)}</strong><small>ランク${
+          entry.rank ?? "-"
+        }・${escapeHtml(entry.category || "分類なし")}</small></div><button class="small-button" data-edit-item="${escapeHtml(
+          entry.id,
+        )}">編集</button><button class="icon-button danger" data-delete-item="${escapeHtml(entry.id)}" aria-label="削除">×</button></article>`;
+      }
+      const dropNames = entry.drops.map((drop) => getItem(drop.itemId)?.category ?? "不明").join("・");
+      return `<article class="manage-row stage-manage-row"><div class="stage-chip">${escapeHtml(
+        entry.name,
+      )}</div><div><strong>ドロップ ${entry.drops.length}件</strong><small>${escapeHtml(dropNames)}</small></div><button class="small-button" data-edit-stage="${escapeHtml(
+        entry.id,
+      )}">編集</button><button class="icon-button danger" data-delete-stage="${escapeHtml(entry.id)}" aria-label="削除">×</button></article>`;
+    })
+    .join("");
+
+  return `<main class="main-content"><section class="page-lead"><p class="eyebrow">LOCAL MASTER DATA</p><h1>ドロップ表を<br />自分で育てる。</h1><p>追加・修正した内容は、この端末のブラウザ内だけに保存されます。</p></section>
+    <div class="segment-control"><button data-edit-section="items" class="${isItems ? "active" : ""}">設計図</button><button data-edit-section="stages" class="${!isItems ? "active" : ""}">ステージ</button></div>
+    <section class="manage-section"><div class="section-heading"><div><small>${isItems ? "BLUEPRINTS" : "STAGES"}</small><h2>${
+      isItems ? "設計図管理" : "ステージ管理"
+    }</h2></div><span>${entries.length}件</span></div>
+      <div class="manage-tools"><input type="search" placeholder="名称で検索" value="${escapeHtml(
+        state.editorQuery,
+      )}" data-editor-query /><button class="primary-button compact" data-add-entry>${isItems ? "設計図を追加" : "ステージを追加"}</button></div>
+      <div class="manage-list">${cards || '<div class="empty-state"><strong>該当するデータがありません</strong></div>'}</div>
+    </section>
+    <section class="danger-zone"><div><strong>初期データへ戻す</strong><p>編集した設計図、ステージ、登録画像を削除します。</p></div><button class="danger-button" data-reset-master>リセット</button></section>
+  </main>`;
+}
+
+function itemEditorModal() {
+  const item = state.modal.itemId ? getItem(state.modal.itemId) : null;
+  return `<div class="modal-backdrop" data-close-modal><section class="modal-sheet form-sheet" role="dialog" aria-modal="true" data-modal-panel><div class="modal-handle"></div><div class="modal-header"><div><small>BLUEPRINT DATA</small><h2>${
+    item ? "設計図を編集" : "設計図を追加"
+  }</h2></div><button class="icon-button" data-close-modal>×</button></div>
+    <form data-item-form><label>設計図名<input name="name" required maxlength="80" value="${escapeHtml(
+      item?.name ?? "",
+    )}" /></label><div class="two-columns"><label>ランク<input name="rank" type="number" min="1" step="1" value="${
+      item?.rank ?? ""
+    }" /></label><label>表示順<input name="sortOrder" type="number" step="1" value="${item?.sortOrder ?? 0}" /></label></div>
+    <label>装備分類<input name="category" list="category-list" maxlength="40" value="${escapeHtml(
+      item?.category ?? "",
+    )}" /></label><datalist id="category-list">${Object.values(ITEM_CATEGORIES)
+      .map((category) => `<option value="${escapeHtml(category)}"></option>`)
+      .join("")}</datalist>
+    <label>アイコン画像<input name="icon" type="file" accept="image/png,image/jpeg,image/webp" /></label>${
+      item?.icon ? '<label class="check-label"><input name="removeIcon" type="checkbox" />登録画像を削除する</label>' : ""
+    }<button class="primary-button full" type="submit">保存する</button></form>
+  </section></div>`;
+}
+
+function stageEditorModal() {
+  const draft = state.modal.draft;
+  const itemOptions = state.masterData.items
+    .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`)
+    .join("");
+  const dropRows = draft.drops
+    .map(
+      (drop, index) => `<div class="drop-edit-row"><select data-drop-item="${index}">${state.masterData.items
+        .map(
+          (item) =>
+            `<option value="${escapeHtml(item.id)}" ${drop.itemId === item.id ? "selected" : ""}>${escapeHtml(
+              item.name,
+            )}</option>`,
+        )
+        .join("") || itemOptions}</select><input type="number" min="1" step="1" value="${drop.quantity}" data-drop-quantity="${
+        index
+      }" aria-label="1周あたりの個数" /><button type="button" class="icon-button danger" data-remove-drop="${index}" aria-label="ドロップを削除">×</button></div>`,
+    )
+    .join("");
+
+  return `<div class="modal-backdrop" data-close-modal><section class="modal-sheet form-sheet" role="dialog" aria-modal="true" data-modal-panel><div class="modal-handle"></div><div class="modal-header"><div><small>STAGE DATA</small><h2>${
+    state.modal.stageId ? "ステージを編集" : "ステージを追加"
+  }</h2></div><button class="icon-button" data-close-modal>×</button></div>
+    <form data-stage-form><label>ステージ名<input required maxlength="30" value="${escapeHtml(
+      draft.name,
+    )}" data-stage-name /></label><label>表示順<input type="number" step="1" value="${draft.sortOrder}" data-stage-sort /></label><fieldset><legend>ドロップ</legend><div class="drop-edit-list">${dropRows}</div><button type="button" class="secondary-button full" data-add-drop>ドロップを追加</button></fieldset><p class="form-error" data-form-error></p><button class="primary-button full" type="submit">保存する</button></form>
+  </section></div>`;
+}
+
+function renderBackup() {
+  return `<main class="main-content"><section class="page-lead backup-lead"><p class="eyebrow">DATA PORTABILITY</p><h1>端末の外にも、<br />安心をひとつ。</h1><p>設計図、ステージ、登録画像を1つのJSONファイルにまとめます。</p></section>
+    <section class="backup-card"><span class="backup-glyph" aria-hidden="true">↓</span><div><small>EXPORT</small><h2>バックアップを書き出す</h2><p>現在のマスターデータを保存します。機種変更前にも実行してください。</p></div><button class="primary-button full" data-export>JSONを書き出す</button></section>
+    <section class="backup-card"><span class="backup-glyph restore" aria-hidden="true">↑</span><div><small>RESTORE</small><h2>バックアップから復元</h2><p>読み込み前に内容を検証し、問題がある場合は現在のデータを変更しません。</p></div><label class="secondary-button full file-button">JSONを選択<input type="file" accept="application/json,.json" data-import /></label></section>
+    <aside class="privacy-note"><strong>このアプリの保存範囲</strong><p>計算条件と結果は保存しません。マスターデータだけをブラウザ内に保存します。</p></aside>
+  </main>`;
+}
+
+function renderModal() {
+  if (!state.modal) return "";
+  if (state.modal.type === "selector") return renderItemSelector();
+  if (state.modal.type === "item") return itemEditorModal();
+  if (state.modal.type === "stage") return stageEditorModal();
+  return "";
+}
+
+function render() {
+  const content =
+    state.view === "planner" ? renderPlanner() : state.view === "editor" ? renderEditor() : renderBackup();
+  app.innerHTML = `${renderHeader()}${content}<nav class="bottom-nav" aria-label="主要メニュー">${navButton(
+    "planner",
+    "周回計算",
+    "◎",
+  )}${navButton("editor", "データ編集", "▦")}${navButton("backup", "バックアップ", "⇅")}</nav>${
+    state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""
+  }${renderModal()}`;
+  bindEvents();
+}
+
+function closeModal() {
+  state.modal = null;
+  render();
+}
+
+function makeStageDraft(stage) {
+  return stage
+    ? { name: stage.name, sortOrder: stage.sortOrder, drops: structuredClone(stage.drops) }
+    : {
+        name: "",
+        sortOrder: 0,
+        drops: [{ itemId: state.masterData.items[0]?.id ?? "", quantity: 1 }],
+      };
+}
+
+function updateStageDraftFromElement(target) {
+  if (target.matches("[data-stage-name]")) state.modal.draft.name = target.value;
+  if (target.matches("[data-stage-sort]")) state.modal.draft.sortOrder = Number(target.value);
+  if (target.matches("[data-drop-item]")) state.modal.draft.drops[Number(target.dataset.dropItem)].itemId = target.value;
+  if (target.matches("[data-drop-quantity]")) {
+    state.modal.draft.drops[Number(target.dataset.dropQuantity)].quantity = Number(target.value);
+  }
+}
+
+async function persistMaster(message) {
+  try {
+    state.masterData = await saveMasterData(state.masterData);
+    state.result = null;
+    closeModal();
+    showToast(message);
+  } catch (error) {
+    state.masterData = await loadMasterData();
+    render();
+    showToast(`保存できませんでした：${error.message}`);
+  }
+}
+
+function readImage(file) {
+  if (!file) return Promise.resolve(null);
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    return Promise.reject(new Error("PNG、JPEG、WebP画像を選択してください。"));
+  }
+  if (file.size > 2 * 1024 * 1024) return Promise.reject(new Error("画像は2MB以下にしてください。"));
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => resolve({ mimeType: file.type, data: reader.result }));
+    reader.addEventListener("error", () => reject(reader.error));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleItemSubmit(form) {
+  const formData = new FormData(form);
+  const existing = state.modal.itemId ? getItem(state.modal.itemId) : null;
+  const rankValue = formData.get("rank");
+  const now = new Date().toISOString();
+  let icon = existing?.icon ?? null;
+  if (formData.get("removeIcon")) icon = null;
+  const file = formData.get("icon");
+  if (file instanceof File && file.size > 0) icon = await readImage(file);
+
+  const item = {
+    id: existing?.id ?? `item-${crypto.randomUUID()}`,
+    code: existing?.code ?? null,
+    name: String(formData.get("name")).trim(),
+    rank: rankValue ? Number(rankValue) : null,
+    category: String(formData.get("category") ?? "").trim(),
+    icon,
+    sortOrder: Number(formData.get("sortOrder")),
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  if (!item.name) throw new Error("設計図名を入力してください。");
+
+  if (existing) {
+    state.masterData.items = state.masterData.items.map((entry) => (entry.id === item.id ? item : entry));
+  } else {
+    state.masterData.items.push(item);
+  }
+  await persistMaster(existing ? "設計図を更新しました。" : "設計図を追加しました。");
+}
+
+async function handleStageSubmit() {
+  const draft = state.modal.draft;
+  const existing = state.modal.stageId
+    ? state.masterData.stages.find((stage) => stage.id === state.modal.stageId)
+    : null;
+  const name = draft.name.trim();
+  if (!name) throw new Error("ステージ名を入力してください。");
+  if (draft.drops.length === 0) throw new Error("ドロップを1件以上追加してください。");
+  if (draft.drops.some((drop) => !drop.itemId || !Number.isInteger(drop.quantity) || drop.quantity < 1)) {
+    throw new Error("ドロップと1周あたりの個数を正しく入力してください。");
+  }
+  if (new Set(draft.drops.map((drop) => drop.itemId)).size !== draft.drops.length) {
+    throw new Error("同じ設計図を重複して登録できません。");
+  }
+  if (state.masterData.stages.some((stage) => stage.id !== existing?.id && stage.name === name)) {
+    throw new Error("同じステージ名がすでに登録されています。");
+  }
+
+  const now = new Date().toISOString();
+  const stage = {
+    id: existing?.id ?? `stage-${crypto.randomUUID()}`,
+    name,
+    drops: structuredClone(draft.drops),
+    sortOrder: Number.isInteger(draft.sortOrder) ? draft.sortOrder : 0,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  if (existing) {
+    state.masterData.stages = state.masterData.stages.map((entry) => (entry.id === stage.id ? stage : entry));
+  } else {
+    state.masterData.stages.push(stage);
+  }
+  await persistMaster(existing ? "ステージを更新しました。" : "ステージを追加しました。");
+}
+
+function calculate() {
+  if (!validateRequests() || state.busy) return;
+  state.busy = true;
+  state.result = null;
+  const worker = new Worker(new URL("./optimizer.worker.js", import.meta.url), { type: "module" });
+  state.worker = worker;
+  const requestId = crypto.randomUUID();
+  worker.addEventListener("message", (event) => {
+    if (event.data.requestId !== requestId) return;
+    state.result = event.data.result;
+    state.busy = false;
+    state.worker = null;
+    worker.terminate();
+    render();
+    document.querySelector("#calculation-result")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  worker.addEventListener("error", (event) => {
+    state.result = { status: "error", message: event.message };
+    state.busy = false;
+    state.worker = null;
+    worker.terminate();
+    render();
+  });
+  worker.postMessage({
+    requestId,
+    requests: state.requests.map((request) => ({ itemId: request.itemId, quantity: Number(request.quantity) })),
+    stages: state.masterData.stages,
+    timeoutMs: 2800,
+  });
+  render();
+}
+
+function bindEvents() {
+  document.querySelectorAll("[data-view]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.view = button.dataset.view;
+      state.modal = null;
+      render();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }),
+  );
+  document.querySelector("[data-open-selector]")?.addEventListener("click", () => {
+    state.modal = { type: "selector" };
+    render();
+  });
+  document.querySelectorAll("[data-close-modal]").forEach((element) =>
+    element.addEventListener("click", (event) => {
+      if (element.hasAttribute("data-modal-panel")) return;
+      if (event.target.closest("[data-modal-panel]") && !event.target.closest("[data-close-modal]")) return;
+      closeModal();
+    }),
+  );
+  document.querySelectorAll("[data-modal-panel]").forEach((panel) => panel.addEventListener("click", (event) => event.stopPropagation()));
+
+  document.querySelectorAll("[data-quantity-id]").forEach((input) =>
+    input.addEventListener("input", () => {
+      const request = state.requests.find((entry) => entry.itemId === input.dataset.quantityId);
+      request.quantity = input.value;
+      state.result = null;
+      render();
+      document.querySelector(`[data-quantity-id="${CSS.escape(request.itemId)}"]`)?.focus();
+    }),
+  );
+  document.querySelectorAll("[data-remove-request]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.requests = state.requests.filter((request) => request.itemId !== button.dataset.removeRequest);
+      state.result = null;
+      render();
+    }),
+  );
+  document.querySelector("[data-calculate]")?.addEventListener("click", calculate);
+  document.querySelector("[data-cancel]")?.addEventListener("click", () => {
+    state.worker?.terminate();
+    state.worker = null;
+    state.busy = false;
+    state.result = { status: "cancelled" };
+    render();
+  });
+
+  document.querySelector("[data-selector-query]")?.addEventListener("input", (event) => {
+    state.selector.query = event.target.value;
+    render();
+    const input = document.querySelector("[data-selector-query]");
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  });
+  document.querySelector("[data-selector-rank]")?.addEventListener("change", (event) => {
+    state.selector.rank = event.target.value;
+    render();
+  });
+  document.querySelector("[data-selector-category]")?.addEventListener("change", (event) => {
+    state.selector.category = event.target.value;
+    render();
+  });
+  document.querySelectorAll("[data-select-item]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.requests.push({ itemId: button.dataset.selectItem, quantity: "1" });
+      state.modal = null;
+      render();
+    }),
+  );
+
+  document.querySelectorAll("[data-edit-section]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.editSection = button.dataset.editSection;
+      state.editorQuery = "";
+      render();
+    }),
+  );
+  document.querySelector("[data-editor-query]")?.addEventListener("input", (event) => {
+    state.editorQuery = event.target.value;
+    render();
+    const input = document.querySelector("[data-editor-query]");
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  });
+  document.querySelector("[data-add-entry]")?.addEventListener("click", () => {
+    state.modal =
+      state.editSection === "items"
+        ? { type: "item", itemId: null }
+        : { type: "stage", stageId: null, draft: makeStageDraft(null) };
+    render();
+  });
+  document.querySelectorAll("[data-edit-item]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.modal = { type: "item", itemId: button.dataset.editItem };
+      render();
+    }),
+  );
+  document.querySelectorAll("[data-edit-stage]").forEach((button) =>
+    button.addEventListener("click", () => {
+      const stage = state.masterData.stages.find((entry) => entry.id === button.dataset.editStage);
+      state.modal = { type: "stage", stageId: stage.id, draft: makeStageDraft(stage) };
+      render();
+    }),
+  );
+  document.querySelectorAll("[data-delete-item]").forEach((button) =>
+    button.addEventListener("click", async () => {
+      const item = getItem(button.dataset.deleteItem);
+      const references = state.masterData.stages.filter((stage) => stage.drops.some((drop) => drop.itemId === item.id));
+      if (references.length > 0) {
+        const names = references.map((stage) => stage.name).join("、");
+        showToast(`先に参照ステージを変更してください：${names}`);
+        return;
+      }
+      if (!window.confirm(`「${item.name}」を削除しますか？`)) return;
+      state.masterData.items = state.masterData.items.filter((entry) => entry.id !== item.id);
+      await persistMaster("設計図を削除しました。");
+    }),
+  );
+  document.querySelectorAll("[data-delete-stage]").forEach((button) =>
+    button.addEventListener("click", async () => {
+      const stage = state.masterData.stages.find((entry) => entry.id === button.dataset.deleteStage);
+      if (!window.confirm(`ステージ「${stage.name}」を削除しますか？`)) return;
+      state.masterData.stages = state.masterData.stages.filter((entry) => entry.id !== stage.id);
+      await persistMaster("ステージを削除しました。");
+    }),
+  );
+  document.querySelector("[data-reset-master]")?.addEventListener("click", async () => {
+    if (!window.confirm("編集した設計図、ステージ、登録画像を削除して初期データへ戻しますか？")) return;
+    state.masterData = await resetMasterData();
+    state.requests = [];
+    state.result = null;
+    showToast("初期データへ戻しました。");
+  });
+
+  document.querySelector("[data-item-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await handleItemSubmit(event.currentTarget);
+    } catch (error) {
+      showToast(error.message);
+    }
+  });
+  document.querySelector("[data-stage-form]")?.addEventListener("input", (event) => updateStageDraftFromElement(event.target));
+  document.querySelector("[data-stage-form]")?.addEventListener("change", (event) => updateStageDraftFromElement(event.target));
+  document.querySelector("[data-stage-form]")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await handleStageSubmit();
+    } catch (error) {
+      const output = document.querySelector("[data-form-error]");
+      if (output) output.textContent = error.message;
+    }
+  });
+  document.querySelector("[data-add-drop]")?.addEventListener("click", () => {
+    state.modal.draft.drops.push({ itemId: state.masterData.items[0]?.id ?? "", quantity: 1 });
+    render();
+  });
+  document.querySelectorAll("[data-remove-drop]").forEach((button) =>
+    button.addEventListener("click", () => {
+      state.modal.draft.drops.splice(Number(button.dataset.removeDrop), 1);
+      render();
+    }),
+  );
+
+  document.querySelector("[data-export]")?.addEventListener("click", () => {
+    downloadBackup(state.masterData);
+    showToast("バックアップを書き出しました。");
+  });
+  document.querySelector("[data-import]")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const restored = parseBackup(await file.text());
+      if (!window.confirm("現在のマスターデータを、選択したバックアップで置き換えますか？")) return;
+      await saveMasterData(restored);
+      state.masterData = restored;
+      state.requests = [];
+      state.result = null;
+      showToast("バックアップを復元しました。");
+    } catch (error) {
+      showToast(`復元できませんでした：${error.message}`);
+    }
+  });
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || location.protocol === "file:") return;
+  try {
+    const registration = await navigator.serviceWorker.register(new URL("../service-worker.js", import.meta.url), {
+      scope: "../",
+    });
+    registration.addEventListener("updatefound", () => {
+      const installing = registration.installing;
+      installing?.addEventListener("statechange", () => {
+        if (installing.state === "installed" && navigator.serviceWorker.controller) {
+          showToast("新しいバージョンがあります。再読み込みすると更新されます。");
+        }
+      });
+    });
+  } catch (error) {
+    console.warn("Service Worker registration failed", error);
+  }
+}
+
+async function start() {
+  try {
+    state.masterData = await loadMasterData();
+    render();
+    registerServiceWorker();
+  } catch (error) {
+    app.innerHTML = `<main class="fatal-error"><h1>初期データを読み込めませんでした</h1><p>${escapeHtml(
+      error.message,
+    )}</p><button onclick="location.reload()">再読み込み</button></main>`;
+  }
+}
+
+start();
