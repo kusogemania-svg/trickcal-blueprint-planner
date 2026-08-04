@@ -1,4 +1,5 @@
 import { createInitialData } from "../../data/initial-data.js";
+import { migrateKnownNames } from "./migrations.js";
 import { assertValidMasterData } from "./validator.js";
 
 const DATABASE_NAME = "trickcal-blueprint-planner";
@@ -51,7 +52,10 @@ function runTransaction(mode, operation) {
 export async function loadMasterData() {
   const stored = await runTransaction("readonly", (store) => store.get(MASTER_KEY));
   if (!stored) return createInitialData();
-  return assertValidMasterData(stored);
+  const migrated = migrateKnownNames(stored);
+  const validData = assertValidMasterData(migrated.data);
+  if (migrated.changed) await saveMasterData(validData);
+  return validData;
 }
 
 export async function saveMasterData(data) {

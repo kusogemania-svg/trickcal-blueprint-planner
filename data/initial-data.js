@@ -4,11 +4,11 @@ const CREATED_AT = "2026-08-04T00:00:00.000Z";
 export const ITEM_CATEGORIES = Object.freeze({
   1: "鎧",
   2: "帽子",
-  3: "煌めく装飾品",
+  3: "リング",
   4: "ブーツ",
-  5: "華麗な装飾品",
-  6: "物理武器",
-  7: "魔法武器",
+  5: "ネックレス",
+  6: "剣",
+  7: "杖",
 });
 
 const STAGE_DROP_TSV = `30-10\t83,94
@@ -296,12 +296,11 @@ function makeItem(code) {
   const rank = Math.floor(Number(code) / 10);
   const categoryCode = Number(code) % 10;
   const category = ITEM_CATEGORIES[categoryCode];
-  const materialType = rank === 4 || rank === 7 ? "欠片" : "設計図";
 
   return {
     id: `item-${code}`,
     code: String(code),
-    name: `ランク${rank} ${category}の${materialType}`,
+    name: `ランク${rank} ${category}`,
     rank,
     category,
     icon: null,

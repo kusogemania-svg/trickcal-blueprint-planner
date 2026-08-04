@@ -1,4 +1,5 @@
 import { assertValidMasterData, validateMasterData } from "./validator.js";
+import { migrateKnownNames } from "./migrations.js";
 
 export function createBackup(masterData) {
   return {
@@ -33,5 +34,5 @@ export function parseBackup(text) {
 
   const restored = structuredClone(parsed);
   delete restored.exportedAt;
-  return assertValidMasterData(restored);
+  return assertValidMasterData(migrateKnownNames(restored).data);
 }

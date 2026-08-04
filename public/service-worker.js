@@ -1,4 +1,4 @@
-const CACHE_VERSION = "trickcal-blueprint-v1";
+const CACHE_VERSION = "trickcal-blueprint-v2";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -8,6 +8,7 @@ const APP_FILES = [
   "./src/styles.css",
   "./src/optimizer.worker.js",
   "./src/core/backup.js",
+  "./src/core/migrations.js",
   "./src/core/optimizer.js",
   "./src/core/storage.js",
   "./src/core/validator.js",

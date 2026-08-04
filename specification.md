@@ -310,7 +310,7 @@ trickcal-blueprint-backup-2026-08-04.json
 ```json
 {
   "id": "item_uuid",
-  "name": "ランク8 鎧の設計図",
+  "name": "ランク8 鎧",
   "rank": 8,
   "category": "鎧",
   "icon": {

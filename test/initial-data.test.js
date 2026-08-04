@@ -22,3 +22,12 @@ test("副産物のないWiki行は1ドロップとして保持される", () => 
   const stage = INITIAL_DATA.stages.find((entry) => entry.name === "8-10");
   assert.deepEqual(stage.drops, [{ itemId: "item-34", quantity: 1 }]);
 });
+
+test("初期設計図は短縮した分類名と名称を使用する", () => {
+  const categories = new Set(INITIAL_DATA.items.map((item) => item.category));
+  assert.ok(categories.has("リング"));
+  assert.ok(categories.has("ネックレス"));
+  assert.ok(categories.has("剣"));
+  assert.ok(categories.has("杖"));
+  assert.ok(INITIAL_DATA.items.every((item) => !/の(?:設計図|欠片)$/.test(item.name)));
+});
