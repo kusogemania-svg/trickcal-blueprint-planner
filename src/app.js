@@ -607,7 +607,7 @@ function bindEvents() {
   document.querySelector("[data-confirm-selection]")?.addEventListener("click", () => {
     const existingIds = new Set(state.requests.map((request) => request.itemId));
     state.selector.draftIds.forEach((itemId) => {
-      if (!existingIds.has(itemId)) state.requests.push({ itemId, quantity: "1" });
+      if (!existingIds.has(itemId)) state.requests.push({ itemId, quantity: "" });
     });
     state.requests.sort((a, b) => compareItems(getItem(a.itemId), getItem(b.itemId)));
     state.selector.draftIds = [];
