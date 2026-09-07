@@ -6,6 +6,8 @@ import { solveMinimumRuns } from "../src/core/optimizer.js";
 const stage = (name, drops) => ({
   id: `stage-${name}`,
   name,
+  chapter: Number(name.split("-")[0]),
+  number: Number(name.split("-")[1]),
   drops: drops.map(([itemId, quantity = 1]) => ({ itemId, quantity })),
 });
 
@@ -66,7 +68,7 @@ test("余剰数も同じ場合は使用ステージ種類数を減らす", () =>
   assert.equal(result.stageRuns[0].stage.name, "1-1");
 });
 
-test("同率解はステージ名の文字列順で一意に決まる", () => {
+test("同じドロップ内容では章・ステージ番号が大きい方を選ぶ", () => {
   const result = solveMinimumRuns({
     requests: [
       { itemId: "A", quantity: 1 },
@@ -76,8 +78,17 @@ test("同率解はステージ名の文字列順で一意に決まる", () => {
   });
   assert.deepEqual(
     result.stageRuns.map((entry) => entry.stage.name).sort(),
-    ["1-1", "1-2"],
+    ["2-1", "2-2"],
   );
+});
+
+test("章番号を優先し、その後でステージ番号を比較する", () => {
+  const result = solveMinimumRuns({
+    requests: [{ itemId: "A", quantity: 3 }],
+    stages: [stage("9-10", [["A"]]), stage("10-1", [["A"]]), stage("8-20", [["A"]])],
+  });
+  assert.equal(result.status, "ok");
+  assert.deepEqual(result.stageRuns.map((entry) => [entry.stage.name, entry.runs]), [["10-1", 3]]);
 });
 
 test("初期データの同時ドロップを実際のステージで利用する", () => {

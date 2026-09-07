@@ -4,6 +4,20 @@ function compareStageNames(a, b) {
   return a.localeCompare(b, "ja", { numeric: false });
 }
 
+function stagePosition(stage) {
+  if (Number.isInteger(stage.chapter) && Number.isInteger(stage.number)) {
+    return [stage.chapter, stage.number];
+  }
+  const match = /^(\d+)-(\d+)$/.exec(stage.name ?? "");
+  return match ? [Number(match[1]), Number(match[2])] : [0, 0];
+}
+
+function compareStageProgress(a, b) {
+  const [aChapter, aNumber] = stagePosition(a);
+  const [bChapter, bNumber] = stagePosition(b);
+  return aChapter - bChapter || aNumber - bNumber || compareStageNames(a.name, b.name);
+}
+
 function effectSignature(effects) {
   return effects.join(",");
 }
@@ -29,13 +43,13 @@ function makeCandidateStages(stages, itemIds) {
 
     const signature = effectSignature(effects);
     const existing = byEffect.get(signature);
-    if (!existing || compareStageNames(stage.name, existing.stage.name) < 0) {
+    if (!existing || compareStageProgress(stage, existing.stage) > 0) {
       byEffect.set(signature, { stage, effects, totalEffect: effects.reduce((sum, n) => sum + n, 0) });
     }
   }
 
   return [...byEffect.values()].sort(
-    (a, b) => b.totalEffect - a.totalEffect || compareStageNames(a.stage.name, b.stage.name),
+    (a, b) => b.totalEffect - a.totalEffect || compareStageProgress(b.stage, a.stage),
   );
 }
 
