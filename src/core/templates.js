@@ -11,35 +11,33 @@ function makeTemplate(rank, type, quantities) {
   });
 }
 
-// Wikiの「周回ステージ例 > 組み合わせ例」に併記された必要個数を使用する。
+// ランク別装備表に記載された、6部位それぞれの必要個数を使用する。
 export const EQUIPMENT_TEMPLATES = Object.freeze([
-  makeTemplate(8, "physical", [{ rank: 8, quantity: 46 }]),
-  makeTemplate(8, "magic", [{ rank: 8, quantity: 46 }]),
-  makeTemplate(7, "physical", [
-    { rank: 8, quantity: 18 },
-    { rank: 7, quantity: 42 },
+  makeTemplate(9, "physical", [
+    { rank: 9, quantity: 52 },
+    { rank: 8, quantity: 20 },
   ]),
-  makeTemplate(7, "magic", [
-    { rank: 8, quantity: 18 },
-    { rank: 7, quantity: 42 },
+  makeTemplate(9, "magic", [
+    { rank: 9, quantity: 52 },
+    { rank: 8, quantity: 20 },
   ]),
-  makeTemplate(6, "physical", [{ rank: 6, quantity: 36 }]),
-  makeTemplate(6, "magic", [{ rank: 6, quantity: 36 }]),
-  makeTemplate(5, "physical", [
-    { rank: 6, quantity: 14 },
-    { rank: 5, quantity: 30 },
+  makeTemplate(8, "physical", [
+    { rank: 8, quantity: 46 },
+    { rank: 7, quantity: 18 },
   ]),
-  makeTemplate(5, "magic", [
-    { rank: 6, quantity: 14 },
-    { rank: 5, quantity: 30 },
+  makeTemplate(8, "magic", [
+    { rank: 8, quantity: 46 },
+    { rank: 7, quantity: 18 },
   ]),
-  makeTemplate(4, "physical", [
-    { rank: 5, quantity: 12 },
-    { rank: 4, quantity: 20 },
+  makeTemplate(7, "physical", [{ rank: 7, quantity: 42 }]),
+  makeTemplate(7, "magic", [{ rank: 7, quantity: 42 }]),
+  makeTemplate(6, "physical", [
+    { rank: 6, quantity: 36 },
+    { rank: 5, quantity: 14 },
   ]),
-  makeTemplate(4, "magic", [
-    { rank: 5, quantity: 12 },
-    { rank: 4, quantity: 20 },
+  makeTemplate(6, "magic", [
+    { rank: 6, quantity: 36 },
+    { rank: 5, quantity: 14 },
   ]),
 ]);
 
