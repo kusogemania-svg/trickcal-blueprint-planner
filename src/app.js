@@ -134,8 +134,11 @@ function renderResult() {
   }
 
   const stageCards = state.result.stageRuns
-    .map(({ stage, runs }) => {
-      const drops = stage.drops
+    .map(({ stage, runs, isAnywhere, usefulItemIds = [] }) => {
+      const displayedDrops = isAnywhere
+        ? stage.drops.filter((drop) => usefulItemIds.includes(drop.itemId))
+        : stage.drops;
+      const drops = displayedDrops
         .map((drop) => {
           const item = getItem(drop.itemId);
           return `<li>${itemIcon(item, "tiny-icon")}<span>${escapeHtml(item?.name ?? drop.itemId)}</span><strong>×${
@@ -144,7 +147,7 @@ function renderResult() {
         })
         .join("");
       return `<article class="stage-card"><div class="stage-number"><small>STAGE</small><strong>${escapeHtml(
-        stage.name,
+        isAnywhere ? "anywhere" : stage.name,
       )}</strong></div><div class="run-count"><strong>${runs}</strong><span>周</span></div><ul>${drops}</ul></article>`;
     })
     .join("");

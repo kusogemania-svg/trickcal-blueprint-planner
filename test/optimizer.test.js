@@ -91,6 +91,29 @@ test("章番号を優先し、その後でステージ番号を比較する", ()
   assert.deepEqual(result.stageRuns.map((entry) => [entry.stage.name, entry.runs]), [["10-1", 3]]);
 });
 
+test("1種類だけを満たす同等候補が複数ある場合はanywhereとする", () => {
+  const result = solveMinimumRuns({
+    requests: [{ itemId: "A", quantity: 3 }],
+    stages: [stage("1-1", [["A"], ["C"]]), stage("2-1", [["A"], ["D"]])],
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(result.stageRuns[0].isAnywhere, true);
+  assert.deepEqual(result.stageRuns[0].usefulItemIds, ["A"]);
+});
+
+test("2種類を同時に満たすステージは具体的な番号を表示する", () => {
+  const result = solveMinimumRuns({
+    requests: [
+      { itemId: "A", quantity: 1 },
+      { itemId: "B", quantity: 1 },
+    ],
+    stages: [stage("1-1", [["A"], ["B"]]), stage("2-1", [["A"]]), stage("2-2", [["B"]])],
+  });
+  assert.equal(result.status, "ok");
+  assert.equal(result.stageRuns[0].isAnywhere, false);
+  assert.equal(result.stageRuns[0].stage.name, "1-1");
+});
+
 test("初期データの同時ドロップを実際のステージで利用する", () => {
   const data = createInitialData();
   const targetStage = data.stages.find((entry) => entry.name === "30-10");

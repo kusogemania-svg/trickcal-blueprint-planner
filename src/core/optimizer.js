@@ -43,8 +43,16 @@ function makeCandidateStages(stages, itemIds) {
 
     const signature = effectSignature(effects);
     const existing = byEffect.get(signature);
-    if (!existing || compareStageProgress(stage, existing.stage) > 0) {
-      byEffect.set(signature, { stage, effects, totalEffect: effects.reduce((sum, n) => sum + n, 0) });
+    if (!existing) {
+      byEffect.set(signature, {
+        stage,
+        effects,
+        totalEffect: effects.reduce((sum, n) => sum + n, 0),
+        equivalentStageCount: 1,
+      });
+    } else {
+      existing.equivalentStageCount += 1;
+      if (compareStageProgress(stage, existing.stage) > 0) existing.stage = stage;
     }
   }
 
@@ -269,7 +277,18 @@ function makeUnitPairPlan(demands, candidates) {
 
 function formatResult(normalizedRequests, candidates, plan, totalRuns, exploredNodes) {
   const stageRuns = plan.counts
-    .map((runs, index) => ({ stage: candidates[index].stage, runs }))
+    .map((runs, index) => {
+      const candidate = candidates[index];
+      const usefulItemIds = candidate.effects
+        .map((quantity, itemIndex) => (quantity > 0 ? normalizedRequests[itemIndex].itemId : null))
+        .filter(Boolean);
+      return {
+        stage: candidate.stage,
+        runs,
+        isAnywhere: usefulItemIds.length === 1 && candidate.equivalentStageCount > 1,
+        usefulItemIds,
+      };
+    })
     .filter((entry) => entry.runs > 0)
     .sort((a, b) => b.runs - a.runs || compareStageNames(a.stage.name, b.stage.name));
 
