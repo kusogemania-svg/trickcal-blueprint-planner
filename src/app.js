@@ -9,6 +9,7 @@ import {
   stageIdentityKey,
 } from "./core/catalog.js";
 import { loadMasterData, resetMasterData, saveMasterData } from "./core/storage.js";
+import { EQUIPMENT_TEMPLATES, resolveEquipmentTemplate } from "./core/templates.js";
 
 const app = document.querySelector("#app");
 
@@ -23,7 +24,7 @@ const state = {
   calculationTimer: null,
   focusedQuantityId: null,
   modal: null,
-  selector: { ranks: [], categories: [], draftIds: [] },
+  selector: { ranks: [], categories: [], draftIds: [], draftQuantities: {}, templateId: "" },
   editorQuery: "",
   toast: "",
 };
@@ -213,6 +214,9 @@ function renderItemSelector() {
 
   return `<div class="modal-backdrop" data-close-modal><section class="modal-sheet selector-sheet" role="dialog" aria-modal="true" aria-labelledby="selector-title" data-modal-panel>
     <div class="modal-handle"></div><div class="modal-header"><div><small>SELECT BLUEPRINT</small><h2 id="selector-title">設計図を選択</h2></div><button class="confirm-button" data-confirm-selection>確定${draftIds.size ? `（${draftIds.size}）` : ""}</button></div>
+    <label class="template-picker"><span>テンプレート</span><select data-template-selection><option value="">選択してください</option>${EQUIPMENT_TEMPLATES.map(
+      (template) => `<option value="${escapeHtml(template.id)}" ${state.selector.templateId === template.id ? "selected" : ""}>${escapeHtml(template.label)}</option>`,
+    ).join("")}</select><small>Wiki記載の構成と必要数をまとめて選択します。選択後に個別調整もできます。</small></label>
     <div class="selector-filters"><fieldset class="filter-group"><legend>ランク（複数選択可）</legend><div class="filter-chips">${ranks
       .map((rank) => {
         const value = String(rank);
@@ -234,9 +238,9 @@ function renderItemSelector() {
         const alreadyAdded = alreadyAddedIds.has(item.id);
         const selected = draftIds.has(item.id);
         return `<button class="item-choice ${alreadyAdded ? "already-added" : ""} ${selected ? "selected" : ""}" data-select-item="${escapeHtml(item.id)}" ${
-          alreadyAdded ? "disabled" : ""
+          alreadyAdded && !selected ? "disabled" : ""
         }>${itemIcon(item)}<span><small>RANK ${item.rank ?? "-"}</small><strong>${escapeHtml(item.category || item.name)}</strong></span>${
-          alreadyAdded ? '<em>追加済み</em>' : selected ? '<em>選択中</em>' : ""
+          selected ? `<em>${alreadyAdded ? "更新対象" : "選択中"}</em>` : alreadyAdded ? '<em>追加済み</em>' : ""
         }</button>`;
       })
       .join("")}</div>
@@ -561,6 +565,8 @@ function bindEvents() {
     state.selector.ranks = [];
     state.selector.categories = [];
     state.selector.draftIds = [];
+    state.selector.draftQuantities = {};
+    state.selector.templateId = "";
     state.modal = { type: "selector" };
     render();
   });
@@ -623,22 +629,54 @@ function bindEvents() {
       render();
     }),
   );
+  document.querySelector("[data-template-selection]")?.addEventListener("change", (event) => {
+    const templateId = event.target.value;
+    if (!templateId) {
+      state.selector.templateId = "";
+      state.selector.draftIds = [];
+      state.selector.draftQuantities = {};
+      render();
+      return;
+    }
+
+    const resolved = resolveEquipmentTemplate(templateId, state.masterData.items);
+    if (!resolved || resolved.missing.length > 0) {
+      const missing = resolved?.missing.map((entry) => `ランク${entry.rank} ${entry.category}`).join("、") ?? "不明";
+      showToast(`テンプレートを適用できません。不足：${missing}`);
+      return;
+    }
+
+    state.selector.templateId = templateId;
+    state.selector.draftIds = resolved.requests.map((request) => request.itemId);
+    state.selector.draftQuantities = Object.fromEntries(
+      resolved.requests.map((request) => [request.itemId, String(request.quantity)]),
+    );
+    render();
+  });
   document.querySelectorAll("[data-select-item]").forEach((button) =>
     button.addEventListener("click", () => {
       const itemId = button.dataset.selectItem;
-      state.selector.draftIds = state.selector.draftIds.includes(itemId)
-        ? state.selector.draftIds.filter((entry) => entry !== itemId)
-        : [...state.selector.draftIds, itemId];
+      if (state.selector.draftIds.includes(itemId)) {
+        state.selector.draftIds = state.selector.draftIds.filter((entry) => entry !== itemId);
+        delete state.selector.draftQuantities[itemId];
+      } else {
+        state.selector.draftIds = [...state.selector.draftIds, itemId];
+      }
+      state.selector.templateId = "";
       render();
     }),
   );
   document.querySelector("[data-confirm-selection]")?.addEventListener("click", () => {
-    const existingIds = new Set(state.requests.map((request) => request.itemId));
     state.selector.draftIds.forEach((itemId) => {
-      if (!existingIds.has(itemId)) state.requests.push({ itemId, quantity: "" });
+      const quantity = state.selector.draftQuantities[itemId] ?? "";
+      const existing = state.requests.find((request) => request.itemId === itemId);
+      if (existing) existing.quantity = quantity || existing.quantity;
+      else state.requests.push({ itemId, quantity });
     });
     state.requests.sort((a, b) => compareItems(getItem(a.itemId), getItem(b.itemId)));
     state.selector.draftIds = [];
+    state.selector.draftQuantities = {};
+    state.selector.templateId = "";
     state.modal = null;
     queueCalculation();
   });

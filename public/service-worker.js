@@ -15,6 +15,7 @@ const APP_FILES = [
   "./src/core/migrations.js",
   "./src/core/optimizer.js",
   "./src/core/storage.js",
+  "./src/core/templates.js",
   "./src/core/validator.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",

@@ -111,7 +111,9 @@ td.excess { color: var(--orange-dark); font-weight: 900; }
 .modal-header h2 { margin: 3px 0 0; font-size: 1.25rem; }
 .confirm-button { min-height: 44px; padding: 8px 14px; color: white; background: var(--green); border: 0; border-radius: 12px; font-weight: 900; }
 .selector-filters, .manage-tools { display: grid; gap: 8px; margin-bottom: 12px; }
-.selector-filters input, .selector-filters select, .manage-tools input, form input, form select { width: 100%; min-height: 44px; padding: 10px 12px; color: var(--ink); background: white; border: 1px solid var(--line); border-radius: 12px; }
+.selector-filters input, .selector-filters select, .template-picker select, .manage-tools input, form input, form select { width: 100%; min-height: 44px; padding: 10px 12px; color: var(--ink); background: white; border: 1px solid var(--line); border-radius: 12px; }
+.template-picker { display: grid; gap: 6px; margin-bottom: 12px; padding: 12px; color: var(--muted); background: #eef8f4; border: 1px solid #bcded2; border-radius: 15px; font-size: 0.76rem; font-weight: 800; }
+.template-picker small { font-size: 0.68rem; font-weight: 500; line-height: 1.5; }
 .filter-row, .two-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .filter-group { padding: 10px; background: white; }
 .filter-chips { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -124,7 +126,7 @@ td.excess { color: var(--orange-dark); font-weight: 900; }
 .item-choice strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.78rem; }
 .item-choice em { position: absolute; right: 6px; top: 6px; padding: 3px 5px; color: white; background: var(--green); border-radius: 6px; font-size: 0.55rem; font-style: normal; }
 .item-choice.selected { border: 2px solid var(--green); background: #eef8f4; }
-.item-choice.already-added { opacity: 0.5; }
+.item-choice.already-added:not(.selected) { opacity: 0.5; }
 
 .segment-control { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 20px; padding: 4px; background: var(--cream); border-radius: 14px; }
 .segment-control button { min-height: 40px; border: 0; border-radius: 10px; color: var(--muted); background: transparent; font-weight: 900; }
