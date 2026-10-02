@@ -11,6 +11,7 @@ import {
 } from "./core/catalog.js";
 import { loadMasterData, resetMasterData, saveMasterData } from "./core/storage.js";
 import { EQUIPMENT_TEMPLATES, resolveEquipmentTemplate } from "./core/templates.js";
+import { solveMinimumRuns } from "./core/optimizer.js";
 
 const app = document.querySelector("#app");
 
@@ -23,6 +24,8 @@ const state = {
   busy: false,
   worker: null,
   calculationTimer: null,
+  workerTimeoutTimer: null,
+  calculationId: 0,
   modal: null,
   selector: { ranks: [], categories: [], draftIds: [], draftQuantities: {}, templateId: "" },
   editorQuery: "",
@@ -507,8 +510,11 @@ async function handleStageSubmit() {
 }
 
 function stopPendingCalculation() {
+  state.calculationId += 1;
   if (state.calculationTimer) window.clearTimeout(state.calculationTimer);
+  if (state.workerTimeoutTimer) window.clearTimeout(state.workerTimeoutTimer);
   state.calculationTimer = null;
+  state.workerTimeoutTimer = null;
   state.worker?.terminate();
   state.worker = null;
   state.busy = false;
@@ -522,31 +528,55 @@ function runCalculation() {
     render();
     return;
   }
-  const worker = new Worker(new URL("./optimizer.worker.js", import.meta.url), { type: "module" });
-  state.worker = worker;
-  const requestId = crypto.randomUUID();
-  worker.addEventListener("message", (event) => {
-    if (event.data.requestId !== requestId || state.worker !== worker) return;
-    state.result = event.data.result;
-    state.busy = false;
-    state.worker = null;
-    worker.terminate();
-    render();
-  });
-  worker.addEventListener("error", (event) => {
-    if (state.worker !== worker) return;
-    state.result = { status: "error", message: event.message };
-    state.busy = false;
-    state.worker = null;
-    worker.terminate();
-    render();
-  });
-  worker.postMessage({
-    requestId,
+  const calculationId = state.calculationId;
+  const payload = {
+    requestId: calculationId,
     requests: state.requests.map((request) => ({ itemId: request.itemId, quantity: Number(request.quantity) })),
     stages: state.masterData.stages,
     timeoutMs: 2800,
-  });
+  };
+  const finish = (result) => {
+    if (state.calculationId !== calculationId) return;
+    stopPendingCalculation();
+    state.result = result;
+    render();
+  };
+  const fallback = () => {
+    if (state.calculationId !== calculationId) return;
+    if (state.workerTimeoutTimer) window.clearTimeout(state.workerTimeoutTimer);
+    state.workerTimeoutTimer = null;
+    state.worker?.terminate();
+    state.worker = null;
+    // Workerの起動失敗・無応答時も、時間制限つきの同じ計算処理で完了させる。
+    state.calculationTimer = window.setTimeout(() => {
+      state.calculationTimer = null;
+      if (state.calculationId !== calculationId) return;
+      try {
+        finish(solveMinimumRuns(payload));
+      } catch (error) {
+        finish({ status: "error", message: error.message ?? "計算に失敗しました。" });
+      }
+    }, 0);
+  };
+  try {
+    const worker = new Worker(new URL("./optimizer.worker.js", import.meta.url), { type: "module" });
+    state.worker = worker;
+    worker.addEventListener("message", (event) => {
+      if (event.data?.requestId !== calculationId || state.worker !== worker) return;
+      if (!event.data.result?.status) { fallback(); return; }
+      finish(event.data.result);
+    });
+    worker.addEventListener("error", () => {
+      if (state.worker === worker) fallback();
+    });
+    worker.addEventListener("messageerror", () => {
+      if (state.worker === worker) fallback();
+    });
+    state.workerTimeoutTimer = window.setTimeout(fallback, 5000);
+    worker.postMessage(payload);
+  } catch {
+    fallback();
+  }
 }
 
 function queueCalculation() {
@@ -830,7 +860,8 @@ async function registerServiceWorker() {
   if (!("serviceWorker" in navigator) || location.protocol === "file:") return;
   try {
     const registration = await navigator.serviceWorker.register(new URL("../service-worker.js", import.meta.url), {
-      scope: "../",
+      scope: new URL("../", import.meta.url).href,
+      updateViaCache: "none",
     });
     registration.addEventListener("updatefound", () => {
       const installing = registration.installing;

@@ -9,9 +9,12 @@ import { fileURLToPath } from "node:url";
 
 const { chromium } = createRequire(import.meta.url)(process.env.PLAYWRIGHT_MODULE_PATH || "playwright");
 const root = fileURLToPath(new URL("../dist/", import.meta.url));
+const sitePath = "/trickcal-blueprint-planner/";
 const server = createServer(async (request, response) => {
   try {
-    const path = new URL(request.url, "http://localhost").pathname;
+    const requestedPath = new URL(request.url, "http://localhost").pathname;
+    assert.ok(requestedPath.startsWith(sitePath));
+    const path = "/" + requestedPath.slice(sitePath.length);
     const file = resolve(root, `.${path === "/" ? "/index.html" : path}`);
     assert.ok(file.startsWith(root));
     const mime = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html" };
@@ -30,7 +33,8 @@ try {
   page.on("pageerror", (error) => errors.push(error.message));
   let workers = 0;
   page.on("worker", () => workers++);
-  await page.goto(`http://127.0.0.1:${server.address().port}/`);
+  const siteUrl = `http://127.0.0.1:${server.address().port}${sitePath}`;
+  await page.goto(siteUrl);
   await page.locator("[data-open-selector]").tap();
   const choice = page.locator('[data-select-item="item-61"]');
   await choice.scrollIntoViewIfNeeded();
@@ -96,6 +100,60 @@ try {
   assert.equal(await page.locator(".calculation-status").count(), 0);
   assert.deepEqual(errors, []);
   console.log("PASS: ランク9物理の確定後に312周の結果を表示");
+
+  for (const failure of ["constructor", "postMessage", "error", "messageerror", "silent"]) {
+    const context = await browser.newContext({ serviceWorkers: "block" });
+    await context.addInitScript((mode) => {
+      window.Worker = class extends EventTarget {
+        constructor() {
+          super();
+          if (mode === "constructor") throw new Error("Worker blocked");
+        }
+        postMessage() {
+          if (mode === "postMessage") throw new Error("Worker message blocked");
+          if (mode === "error" || mode === "messageerror") setTimeout(() => this.dispatchEvent(new Event(mode)), 0);
+        }
+        terminate() {}
+      };
+    }, failure);
+    const recoveryPage = await context.newPage();
+    await recoveryPage.goto(siteUrl);
+    await recoveryPage.locator("[data-open-selector]").click();
+    await recoveryPage.locator("[data-template-selection]").selectOption("rank-9-physical");
+    await recoveryPage.locator("[data-confirm-selection]").click();
+    await recoveryPage.locator("#calculation-result").waitFor({ timeout: 10000 });
+    assert.equal(await recoveryPage.locator(".total-runs strong").innerText(), "312");
+    assert.equal(await recoveryPage.locator(".calculation-status").count(), 0);
+    if (failure === "silent") {
+      await recoveryPage.locator("[data-calculate]").click();
+      await recoveryPage.locator('[data-quantity-id="item-91"]').fill("51");
+      await recoveryPage.waitForTimeout(5500);
+      assert.equal(await recoveryPage.locator("#calculation-result").count(), 0);
+      assert.equal(await recoveryPage.locator(".calculation-status").count(), 0);
+    }
+    await context.close();
+    console.log(`PASS: Worker ${failure}でも計算が完了（無応答中の編集はキャンセル）`);
+  }
+
+  const cachedContext = await browser.newContext({ serviceWorkers: "allow" });
+  const cachedPage = await cachedContext.newPage();
+  await cachedPage.goto(siteUrl);
+  await cachedPage.waitForFunction(async () => {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    return registrations.some((registration) => registration.active?.state === "activated");
+  }, null, { timeout: 10000 });
+  assert.equal(await cachedPage.evaluate(async () => (await navigator.serviceWorker.ready).scope), siteUrl);
+  await cachedPage.reload();
+  assert.ok(await cachedPage.evaluate(() => navigator.serviceWorker.controller));
+  await cachedContext.setOffline(true);
+  await cachedPage.reload();
+  await cachedPage.locator("[data-open-selector]").click();
+  await cachedPage.locator("[data-template-selection]").selectOption("rank-9-physical");
+  await cachedPage.locator("[data-confirm-selection]").click();
+  await cachedPage.locator("#calculation-result").waitFor({ timeout: 10000 });
+  assert.equal(await cachedPage.locator(".total-runs strong").innerText(), "312");
+  await cachedContext.close();
+  console.log("PASS: 公開と同じサブパスでキャッシュ登録・オフライン再読込・312周の計算");
 } finally {
   await browser?.close();
   await new Promise((done) => server.close(done));
