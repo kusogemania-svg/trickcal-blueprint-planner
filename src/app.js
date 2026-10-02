@@ -2,6 +2,7 @@ import { downloadBackup, parseBackup } from "./core/backup.js";
 import {
   CATEGORY_ORDER,
   compareItems,
+  compareRequestItems,
   compareStages,
   deriveItemName,
   deriveStageName,
@@ -22,7 +23,6 @@ const state = {
   busy: false,
   worker: null,
   calculationTimer: null,
-  focusedQuantityId: null,
   modal: null,
   selector: { ranks: [], categories: [], draftIds: [], draftQuantities: {}, templateId: "" },
   editorQuery: "",
@@ -175,10 +175,10 @@ function renderPlanner() {
     <section class="request-section"><div class="section-heading"><div><small>STEP 1</small><h2>必要な設計図</h2></div><span>${state.requests.length}件</span></div>
       <div class="request-list">${
         state.requests.length > 0
-          ? state.requests.map(renderRequestRow).join("")
+          ? [...state.requests].sort((a, b) => compareRequestItems(getItem(a.itemId), getItem(b.itemId))).map(renderRequestRow).join("")
           : '<div class="empty-state"><span aria-hidden="true">＋</span><strong>設計図を追加してください</strong><p>複数種類をまとめて選べます。</p></div>'
       }</div>
-      <button class="secondary-button full" data-open-selector>設計図を追加</button>
+      <div class="planner-actions"><button class="secondary-button" data-open-selector>設計図を追加</button><button class="primary-button" data-calculate ${!validateRequests() || state.busy ? "disabled" : ""}>計算</button></div>
     </section>
     ${state.busy ? '<div class="calculation-status" role="status"><span aria-hidden="true"></span>結果を更新しています…</div>' : ""}
     ${renderResult()}
@@ -353,6 +353,11 @@ function renderModal() {
 }
 
 function render() {
+  const selectorScrollTop = document.querySelector(".selector-sheet")?.scrollTop ?? 0;
+  const activeInput = document.activeElement;
+  const focusedQuantityId = activeInput?.dataset?.quantityId;
+  const selectionStart = focusedQuantityId ? activeInput.selectionStart : null;
+  const selectionEnd = focusedQuantityId ? activeInput.selectionEnd : null;
   const content =
     state.view === "planner" ? renderPlanner() : state.view === "editor" ? renderEditor() : renderBackup();
   app.innerHTML = `${renderHeader()}${content}<nav class="bottom-nav" aria-label="主要メニュー">${navButton(
@@ -363,11 +368,13 @@ function render() {
     state.toast ? `<div class="toast" role="status">${escapeHtml(state.toast)}</div>` : ""
   }${renderModal()}`;
   bindEvents();
-  if (state.focusedQuantityId) {
-    const input = document.querySelector(`[data-quantity-id="${CSS.escape(state.focusedQuantityId)}"]`);
+  const selectorSheet = document.querySelector(".selector-sheet");
+  if (selectorSheet) selectorSheet.scrollTop = selectorScrollTop;
+  if (focusedQuantityId && !state.modal) {
+    const input = document.querySelector(`[data-quantity-id="${CSS.escape(focusedQuantityId)}"]`);
     if (input) {
       input.focus({ preventScroll: true });
-      input.setSelectionRange(input.value.length, input.value.length);
+      input.setSelectionRange(selectionStart, selectionEnd);
     }
   }
 }
@@ -400,7 +407,7 @@ async function persistMaster(message) {
   try {
     state.masterData = await saveMasterData(state.masterData);
     state.modal = null;
-    queueCalculation();
+    invalidateCalculation();
     showToast(message);
   } catch (error) {
     stopPendingCalculation();
@@ -547,12 +554,19 @@ function queueCalculation() {
   state.result = null;
   if (validateRequests()) {
     state.busy = true;
-    state.calculationTimer = window.setTimeout(runCalculation, 180);
+    state.calculationTimer = window.setTimeout(runCalculation, 0);
   }
   render();
 }
 
+function invalidateCalculation(shouldRender = true) {
+  stopPendingCalculation();
+  state.result = null;
+  if (shouldRender) render();
+}
+
 function bindEvents() {
+  document.querySelector("[data-calculate]")?.addEventListener("click", queueCalculation);
   document.querySelectorAll("[data-view]").forEach((button) =>
     button.addEventListener("click", () => {
       state.view = button.dataset.view;
@@ -581,33 +595,44 @@ function bindEvents() {
 
   document.querySelectorAll("[data-quantity-id]").forEach((input) =>
     {
+      let selectOnClick = false;
+      input.addEventListener("pointerdown", () => {
+        selectOnClick = document.activeElement !== input;
+      });
       input.addEventListener("focus", () => {
-        state.focusedQuantityId = input.dataset.quantityId;
+        input.select();
+      });
+      input.addEventListener("click", () => {
+        if (selectOnClick) input.select();
+        selectOnClick = false;
       });
       input.addEventListener("input", () => {
+        selectOnClick = false;
         const request = state.requests.find((entry) => entry.itemId === input.dataset.quantityId);
         input.value = input.value.replace(/[^0-9]/g, "").slice(0, 3);
         request.quantity = input.value;
-        state.focusedQuantityId = request.itemId;
-        queueCalculation();
-      });
-      input.addEventListener("blur", () => {
-        const quantityId = input.dataset.quantityId;
-        window.setTimeout(() => {
-          if (
-            state.focusedQuantityId === quantityId &&
-            document.activeElement?.dataset.quantityId !== quantityId
-          ) {
-            state.focusedQuantityId = null;
-          }
-        }, 0);
+        invalidateCalculation(false);
+        // 入力中のDOMを保持し、キーボードとカーソル位置を変えない。
+        const row = input.closest(".request-row");
+        const valid = /^\d+$/.test(input.value) && Number(input.value) >= 1 && Number(input.value) <= 999;
+        row.classList.toggle("has-error", !valid);
+        row.querySelector(".field-error")?.remove();
+        if (!valid) {
+          const error = document.createElement("p");
+          error.className = "field-error";
+          error.textContent = "1〜999の整数を入力してください。";
+          row.append(error);
+        }
+        document.querySelector("[data-calculate]").disabled = !validateRequests();
+        document.querySelector(".result-panel")?.remove();
+        document.querySelector(".calculation-status")?.remove();
       });
     },
   );
   document.querySelectorAll("[data-remove-request]").forEach((button) =>
     button.addEventListener("click", () => {
       state.requests = state.requests.filter((request) => request.itemId !== button.dataset.removeRequest);
-      queueCalculation();
+      invalidateCalculation();
     }),
   );
 
@@ -667,18 +692,19 @@ function bindEvents() {
     }),
   );
   document.querySelector("[data-confirm-selection]")?.addEventListener("click", () => {
+    const fromTemplate = state.selector.draftIds.some((id) => state.selector.draftQuantities[id] != null);
     state.selector.draftIds.forEach((itemId) => {
       const quantity = state.selector.draftQuantities[itemId] ?? "";
       const existing = state.requests.find((request) => request.itemId === itemId);
       if (existing) existing.quantity = quantity || existing.quantity;
       else state.requests.push({ itemId, quantity });
     });
-    state.requests.sort((a, b) => compareItems(getItem(a.itemId), getItem(b.itemId)));
     state.selector.draftIds = [];
     state.selector.draftQuantities = {};
     state.selector.templateId = "";
     state.modal = null;
-    queueCalculation();
+    if (fromTemplate) queueCalculation();
+    else invalidateCalculation();
   });
 
   document.querySelectorAll("[data-edit-section]").forEach((button) =>

@@ -43,6 +43,14 @@ export function compareStages(a, b) {
   );
 }
 
+export function compareRequestItems(a, b) {
+  const aIncomplete = !Number.isInteger(a.rank) || a.rank < 1 || !normalizedCategory(a.category);
+  const bIncomplete = !Number.isInteger(b.rank) || b.rank < 1 || !normalizedCategory(b.category);
+  if (aIncomplete !== bIncomplete) return aIncomplete ? -1 : 1;
+  return compareCategories(a.category, b.category) || (b.rank ?? 0) - (a.rank ?? 0) ||
+    String(a.id).localeCompare(String(b.id), "ja");
+}
+
 export function itemIdentityKey(item) {
   return `${Number.isInteger(item?.rank) ? item.rank : ""}\u0000${normalizedCategory(item?.category)}`;
 }
