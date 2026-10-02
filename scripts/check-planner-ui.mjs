@@ -87,6 +87,15 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   assert.deepEqual(errors, []);
   console.log("PASS: 選択画面の順序維持・個別追加/削除は手動計算・入力検証・横はみ出しなし");
+  await page.reload();
+  await page.locator("[data-open-selector]").tap();
+  await page.locator("[data-template-selection]").selectOption("rank-9-physical");
+  await page.locator("[data-confirm-selection]").tap();
+  await page.locator("#calculation-result").waitFor({ timeout: 2000 });
+  assert.equal(await page.locator(".total-runs strong").innerText(), "312");
+  assert.equal(await page.locator(".calculation-status").count(), 0);
+  assert.deepEqual(errors, []);
+  console.log("PASS: ランク9物理の確定後に312周の結果を表示");
 } finally {
   await browser?.close();
   await new Promise((done) => server.close(done));

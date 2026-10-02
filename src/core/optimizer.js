@@ -128,7 +128,7 @@ function makeGreedyPlan(demands, candidates) {
   return { totalRuns, counts };
 }
 
-function findMaximumMatching(graph) {
+function findMaximumMatching(graph, checkBudget) {
   const vertexCount = graph.length;
   const match = Array(vertexCount).fill(-1);
   const parent = Array(vertexCount).fill(-1);
@@ -169,6 +169,7 @@ function findMaximumMatching(graph) {
     const queue = [root];
     used[root] = true;
     for (let head = 0; head < queue.length; head += 1) {
+      checkBudget();
       const vertex = queue[head];
       for (const neighbor of graph[vertex]) {
         if (base[vertex] === base[neighbor] || match[vertex] === neighbor) continue;
@@ -214,7 +215,7 @@ function findMaximumMatching(graph) {
   return match;
 }
 
-function makeUnitPairPlan(demands, candidates) {
+function makeUnitPairPlan(demands, candidates, checkBudget) {
   const totalDemand = demands.reduce((sum, demand) => sum + demand, 0);
   if (totalDemand > 600) return null;
 
@@ -231,21 +232,23 @@ function makeUnitPairPlan(demands, candidates) {
     else if (affectedItems.length === 2) pairCandidates.set(affectedItems.join(","), candidateIndex);
     else return null;
   }
-  if (singletonCandidates.some((candidateIndex) => candidateIndex === -1)) return null;
-
   const cloneItems = [];
-  const itemClones = demands.map((demand, itemIndex) => {
-    const clones = [];
-    for (let count = 0; count < demand; count += 1) {
-      clones.push(cloneItems.length);
+  const itemClones = demands.map(() => []);
+  // 単独で集められない設計図から組にして、不要な副産物を減らす。
+  const itemOrder = demands.map((_, index) => index).sort((a, b) =>
+    Number(singletonCandidates[a] !== -1) - Number(singletonCandidates[b] !== -1),
+  );
+  for (const itemIndex of itemOrder) {
+    for (let count = 0; count < demands[itemIndex]; count += 1) {
+      itemClones[itemIndex].push(cloneItems.length);
       cloneItems.push(itemIndex);
     }
-    return clones;
-  });
+  }
   const graph = Array.from({ length: cloneItems.length }, () => []);
   for (const key of pairCandidates.keys()) {
     const [firstItem, secondItem] = key.split(",").map(Number);
     for (const firstClone of itemClones[firstItem]) {
+      checkBudget();
       for (const secondClone of itemClones[secondItem]) {
         graph[firstClone].push(secondClone);
         graph[secondClone].push(firstClone);
@@ -253,12 +256,18 @@ function makeUnitPairPlan(demands, candidates) {
     }
   }
 
-  const match = findMaximumMatching(graph);
+  const match = findMaximumMatching(graph, checkBudget);
   const counts = Array(candidates.length).fill(0);
   let matchedPairs = 0;
   for (let clone = 0; clone < match.length; clone += 1) {
     if (match[clone] === -1) {
-      counts[singletonCandidates[cloneItems[clone]]] += 1;
+      const itemIndex = cloneItems[clone];
+      // 最大マッチング後の未対応分は、単独候補がなければ同時ドロップで補う。
+      // 未対応同士を結ぶ辺は残っていないため、1周ずつ補えば総周回数は最小。
+      const candidateIndex = singletonCandidates[itemIndex] !== -1
+        ? singletonCandidates[itemIndex]
+        : candidates.findIndex((candidate) => candidate.effects[itemIndex] === 1);
+      counts[candidateIndex] += 1;
     } else if (clone < match[clone]) {
       const itemPair = [cloneItems[clone], cloneItems[match[clone]]].sort((a, b) => a - b).join(",");
       counts[pairCandidates.get(itemPair)] += 1;
@@ -266,10 +275,13 @@ function makeUnitPairPlan(demands, candidates) {
     }
   }
 
+  const obtained = demands.map((_, itemIndex) => candidates.reduce(
+    (sum, candidate, candidateIndex) => sum + candidate.effects[itemIndex] * counts[candidateIndex], 0,
+  ));
   return {
     counts,
-    obtained: [...demands],
-    excess: 0,
+    obtained,
+    excess: obtained.reduce((sum, quantity, index) => sum + quantity - demands[index], 0),
     stageTypes: counts.filter((count) => count > 0).length,
     totalRuns: totalDemand - matchedPairs,
   };
@@ -416,18 +428,22 @@ export function solveMinimumRuns({ requests, stages, timeoutMs = DEFAULT_TIMEOUT
   const greedy = makeGreedyPlan(demands, candidates);
   if (!greedy) return { status: "unavailable", unavailableItemIds: itemIds };
 
-  if (demands.reduce((sum, demand) => sum + demand, 0) >= 64) {
-    const unitPairPlan = makeUnitPairPlan(demands, candidates);
-    if (unitPairPlan) {
-      return formatResult(normalizedRequests, candidates, unitPairPlan, unitPairPlan.totalRuns, 0);
-    }
-  }
-
   const deadline = Date.now() + timeoutMs;
+  const checkBudget = () => {
+    if (shouldAbort?.()) throw new DOMException("計算をキャンセルしました。", "AbortError");
+    if (Date.now() > deadline) throw new Error("TIMEOUT");
+  };
   const firstRunCount = lowerBound(demands, candidates);
   let totalExploredNodes = 0;
 
   try {
+    checkBudget();
+    if (demands.reduce((sum, demand) => sum + demand, 0) >= 64) {
+      const unitPairPlan = makeUnitPairPlan(demands, candidates, checkBudget);
+      if (unitPairPlan) {
+        return formatResult(normalizedRequests, candidates, unitPairPlan, unitPairPlan.totalRuns, 0);
+      }
+    }
     for (let runCount = firstRunCount; runCount <= greedy.totalRuns; runCount += 1) {
       const { bestPlan, exploredNodes } = searchAtRunCount(
         demands,
