@@ -871,6 +871,7 @@ async function registerServiceWorker() {
         }
       });
     });
+    await registration.update();
   } catch (error) {
     console.warn("Service Worker registration failed", error);
   }

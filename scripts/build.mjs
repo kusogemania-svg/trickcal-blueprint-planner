@@ -107,6 +107,12 @@ for (const path of cacheFiles) {
   contentHash.update(await readFile(path));
 }
 const cacheVersion = `trickcal-blueprint-${contentHash.digest("hex").slice(0, 12)}`;
+// 旧Service Workerが動作中でも、新しいHTMLから新しいCSSを取得できるようにする。
+const indexPath = join(outputDirectory, "index.html");
+const indexSource = await readFile(indexPath, "utf8");
+await writeFile(indexPath, indexSource
+  .replace('./src/styles.css"', `./src/styles.css?v=${cacheVersion}"`)
+  .replace('./src/app.js"', `./src/app.js?v=${cacheVersion}"`));
 const serviceWorkerSource = await readFile(serviceWorkerPath, "utf8");
 await writeFile(
   serviceWorkerPath,
