@@ -72,7 +72,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, label.file-butt
 .icon-button { display: grid; place-items: center; width: 38px; height: 38px; padding: 0; border: 0; border-radius: 12px; color: var(--muted); background: #f5efe4; font-size: 1.2rem; }
 .icon-button.danger { color: var(--red); background: #fff1ef; }
 .planner-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; margin-top: 12px; }
-.planner-actions [data-open-selector] { padding-inline: 12px; }
+.planner-actions [data-open-selector] { padding-inline: 12px; background: var(--green); }
 /* 従来幅（2文字 + 左右padding 36px + border 4px）の2倍。 */
 .planner-actions [data-calculate] { width: calc(4em + 80px); }
 .calculation-status { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 18px; color: var(--green); font-size: 0.78rem; font-weight: 900; }
