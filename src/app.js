@@ -181,7 +181,7 @@ function renderPlanner() {
           ? [...state.requests].sort((a, b) => compareRequestItems(getItem(a.itemId), getItem(b.itemId))).map(renderRequestRow).join("")
           : '<div class="empty-state"><span aria-hidden="true">＋</span><strong>設計図を追加してください</strong><p>複数種類をまとめて選べます。</p></div>'
       }</div>
-      <div class="planner-actions"><button class="secondary-button" data-open-selector>設計図を追加</button><button class="primary-button" data-calculate ${!validateRequests() || state.busy ? "disabled" : ""}>計算</button></div>
+      <div class="planner-actions"><button class="primary-button" data-open-selector>設計図を追加</button><button class="primary-button" data-calculate ${!validateRequests() || state.busy ? "disabled" : ""}>計算</button></div>
     </section>
     ${state.busy ? '<div class="calculation-status" role="status"><span aria-hidden="true"></span>結果を更新しています…</div>' : ""}
     ${renderResult()}
