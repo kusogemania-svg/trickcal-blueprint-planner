@@ -1,5 +1,5 @@
 import { createInitialData } from "../../data/initial-data.js";
-import { normalizeMasterData } from "./migrations.js";
+import { addRank10Catalog, normalizeMasterData } from "./migrations.js";
 import { assertValidMasterData } from "./validator.js";
 
 const DATABASE_NAME = "trickcal-blueprint-planner";
@@ -27,7 +27,7 @@ function runTransaction(mode, operation) {
         const store = transaction.objectStore(STORE_NAME);
         let result;
         try {
-          result = operation(store);
+          result = operation(store, reject);
         } catch (error) {
           database.close();
           reject(error);
@@ -50,16 +50,31 @@ function runTransaction(mode, operation) {
 }
 
 export async function loadMasterData() {
-  const stored = await runTransaction("readonly", (store) => store.get(MASTER_KEY));
-  if (!stored) return createInitialData();
-  const migrated = normalizeMasterData(stored);
-  const validData = assertValidMasterData(migrated.data);
-  if (migrated.changed) await saveMasterData(validData);
-  return validData;
+  return runTransaction("readwrite", (store, reject) => {
+    const request = store.get(MASTER_KEY);
+    const loaded = { result: null };
+    request.addEventListener("success", () => {
+      try {
+        if (!request.result) {
+          loaded.result = createInitialData();
+          return;
+        }
+        const normalized = normalizeMasterData(request.result);
+        const updated = addRank10Catalog(assertValidMasterData(normalized.data));
+        loaded.result = assertValidMasterData(updated.data);
+        if (normalized.changed || updated.changed) store.put(loaded.result, MASTER_KEY);
+      } catch (error) {
+        reject(error);
+        store.transaction.abort();
+      }
+    });
+    return loaded;
+  });
 }
 
 export async function saveMasterData(data) {
-  const validData = assertValidMasterData(normalizeMasterData(data).data);
+  const normalized = assertValidMasterData(normalizeMasterData(data).data);
+  const validData = assertValidMasterData(addRank10Catalog(normalized).data);
   await runTransaction("readwrite", (store) => store.put(validData, MASTER_KEY));
   return validData;
 }

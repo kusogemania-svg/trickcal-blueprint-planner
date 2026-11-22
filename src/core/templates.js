@@ -11,8 +11,11 @@ function makeTemplate(rank, type, quantities) {
   });
 }
 
-// ランク別装備表に記載された、6部位それぞれの必要個数を使用する。
+// 6部位それぞれの必要個数。ランク10はWikiの装備の定石表で、
+// 1部位2,304個・主素材1個あたり36個・副素材欄なしのため64個。
 export const EQUIPMENT_TEMPLATES = Object.freeze([
+  makeTemplate(10, "physical", [{ rank: 10, quantity: 64 }]),
+  makeTemplate(10, "magic", [{ rank: 10, quantity: 64 }]),
   makeTemplate(9, "physical", [
     { rank: 9, quantity: 52 },
     { rank: 8, quantity: 20 },

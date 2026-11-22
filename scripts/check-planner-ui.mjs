@@ -72,7 +72,7 @@ try {
 
   await page.locator("[data-open-selector]").tap();
   const choiceIds = await page.locator("[data-select-item]").evaluateAll((buttons) => buttons.slice(0, 8).map((button) => button.dataset.selectItem));
-  assert.deepEqual(choiceIds, ["item-91", "item-95", "item-92", "item-93", "item-94", "item-96", "item-97", "item-81"]);
+  assert.deepEqual(choiceIds, ["item-101", "item-105", "item-102", "item-103", "item-104", "item-106", "item-107", "item-91"]);
   await page.locator('[data-select-item="item-91"]').tap();
   await page.locator("[data-confirm-selection]").tap();
   const blank = page.locator('[data-quantity-id="item-91"]');
@@ -96,10 +96,10 @@ try {
   await page.locator("[data-template-selection]").selectOption("rank-9-physical");
   await page.locator("[data-confirm-selection]").tap();
   await page.locator("#calculation-result").waitFor({ timeout: 2000 });
-  assert.equal(await page.locator(".total-runs strong").innerText(), "312");
+  assert.equal(await page.locator(".total-runs strong").innerText(), "216");
   assert.equal(await page.locator(".calculation-status").count(), 0);
   assert.deepEqual(errors, []);
-  console.log("PASS: ランク9物理の確定後に312周の結果を表示");
+  console.log("PASS: ランク9物理の確定後に216周の結果を表示");
 
   for (const failure of ["constructor", "postMessage", "error", "messageerror", "silent"]) {
     const context = await browser.newContext({ serviceWorkers: "block" });
@@ -122,7 +122,7 @@ try {
     await recoveryPage.locator("[data-template-selection]").selectOption("rank-9-physical");
     await recoveryPage.locator("[data-confirm-selection]").click();
     await recoveryPage.locator("#calculation-result").waitFor({ timeout: 10000 });
-    assert.equal(await recoveryPage.locator(".total-runs strong").innerText(), "312");
+    assert.equal(await recoveryPage.locator(".total-runs strong").innerText(), "216");
     assert.equal(await recoveryPage.locator(".calculation-status").count(), 0);
     if (failure === "silent") {
       await recoveryPage.locator("[data-calculate]").click();
@@ -148,12 +148,12 @@ try {
   await cachedContext.setOffline(true);
   await cachedPage.reload();
   await cachedPage.locator("[data-open-selector]").click();
-  await cachedPage.locator("[data-template-selection]").selectOption("rank-9-physical");
+  await cachedPage.locator("[data-template-selection]").selectOption("rank-10-physical");
   await cachedPage.locator("[data-confirm-selection]").click();
   await cachedPage.locator("#calculation-result").waitFor({ timeout: 10000 });
-  assert.equal(await cachedPage.locator(".total-runs strong").innerText(), "312");
+  assert.equal(await cachedPage.locator(".total-runs strong").innerText(), "384");
   await cachedContext.close();
-  console.log("PASS: 公開と同じサブパスでキャッシュ登録・オフライン再読込・312周の計算");
+  console.log("PASS: 第34章まで収録したオフライン版でランク10物理は384周");
 } finally {
   await browser?.close();
   await new Promise((done) => server.close(done));

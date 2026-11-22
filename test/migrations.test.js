@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeMasterData } from "../src/core/migrations.js";
+import { createInitialData } from "../data/initial-data.js";
+import { addRank10Catalog, normalizeMasterData } from "../src/core/migrations.js";
+import { validateMasterData } from "../src/core/validator.js";
 
 test("保存済みの初期設計図名を新しい表記へ移行する", () => {
   const oldData = {
@@ -40,4 +42,28 @@ test("利用者が追加した設計図もランクと分類から名称を生�
   const migrated = normalizeMasterData(customData);
   assert.equal(migrated.changed, true);
   assert.equal(migrated.data.items[0].name, "ランク11 剣");
+});
+
+test("新カタログを既存の端末データへ一度だけ追加し、手動登録と削除を維持する", () => {
+  const oldData = createInitialData();
+  delete oldData.catalogRevision;
+  oldData.items = oldData.items.filter((item) => item.rank < 10 || item.id === "item-104");
+  oldData.stages = oldData.stages.filter((stage) => stage.chapter <= 30 && stage.name !== "3-1");
+  const customItem = oldData.items.find((item) => item.id === "item-104");
+  customItem.id = "custom-boots";
+  const customStage = {
+    id: "custom-34-10", name: "34-10", chapter: 34, number: 10,
+    drops: [{ itemId: customItem.id, quantity: 2 }],
+  };
+  oldData.stages.push(customStage);
+
+  const { data, changed } = addRank10Catalog(oldData);
+  assert.equal(changed, true);
+  assert.equal(validateMasterData(data).valid, true);
+  assert.equal(data.items.filter((item) => item.rank === 10).length, 7);
+  assert.equal(data.stages.filter((stage) => stage.chapter >= 31).length, 40);
+  assert.deepEqual(data.stages.find((stage) => stage.name === "34-10"), customStage);
+  assert.equal(data.stages.find((stage) => stage.name === "34-3").drops[0].itemId, customItem.id);
+  assert.equal(data.stages.some((stage) => stage.name === "3-1"), false);
+  assert.deepEqual(addRank10Catalog(data), { data, changed: false });
 });

@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { INITIAL_DATA } from "../data/initial-data.js";
 import { EQUIPMENT_TEMPLATES, resolveEquipmentTemplate } from "../src/core/templates.js";
 
-test("ランク9から6まで物理・魔法の8テンプレートを定義する", () => {
+test("ランク10から6まで物理・魔法の10テンプレートを定義する", () => {
   assert.deepEqual(
     EQUIPMENT_TEMPLATES.map((template) => template.label),
     [
+      "ランク10 物理",
+      "ランク10 魔法",
       "ランク9 物理",
       "ランク9 魔法",
       "ランク8 物理",
@@ -19,8 +21,9 @@ test("ランク9から6まで物理・魔法の8テンプレートを定義す�
   );
 });
 
-test("画像のランク別必要数を各6部位へ設定する", () => {
+test("ランク別必要数を各6部位へ設定する", () => {
   const expected = new Map([
+    ["rank-10-physical", [[10, 64]]],
     ["rank-9-physical", [[9, 52], [8, 20]]],
     ["rank-8-physical", [[8, 46], [7, 18]]],
     ["rank-7-physical", [[7, 42]]],

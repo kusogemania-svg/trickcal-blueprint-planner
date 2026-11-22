@@ -13,7 +13,7 @@ test("56種類の初期アイコンが設計図コードと対応している", 
   const filenames = (await readdir(iconDirectory)).filter((name) => name.endsWith(".webp")).sort();
   assert.deepEqual(filenames, expectedCodes.map((code) => `${code}.webp`));
   assert.deepEqual(
-    INITIAL_DATA.items.map((item) => item.defaultIconPath).sort(),
+    INITIAL_DATA.items.map((item) => item.defaultIconPath).filter(Boolean).sort(),
     expectedCodes.map((code) => `./blueprint-icons/${code}.webp`).sort(),
   );
 });

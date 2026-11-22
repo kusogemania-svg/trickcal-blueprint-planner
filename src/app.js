@@ -844,9 +844,9 @@ function bindEvents() {
     try {
       const restored = parseBackup(await file.text());
       if (!window.confirm("現在のマスターデータを、選択したバックアップで置き換えますか？")) return;
-      await saveMasterData(restored);
+      const saved = await saveMasterData(restored);
       stopPendingCalculation();
-      state.masterData = restored;
+      state.masterData = saved;
       state.requests = [];
       state.result = null;
       showToast("バックアップを復元しました。");

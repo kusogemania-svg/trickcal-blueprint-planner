@@ -1,6 +1,6 @@
 import { CATEGORY_ORDER, compareItems, compareStages, deriveItemName, deriveStageName } from "../src/core/catalog.js";
 
-const SOURCE_UPDATED_AT = "2026-08-01T06:56:23+09:00";
+const SOURCE_UPDATED_AT = "2026-11-21T19:03:38+09:00";
 const CREATED_AT = "2026-08-04T00:00:00.000Z";
 
 export const ITEM_CATEGORIES = Object.freeze({
@@ -13,7 +13,47 @@ export const ITEM_CATEGORIES = Object.freeze({
   7: CATEGORY_ORDER[6],
 });
 
-const STAGE_DROP_TSV = `30-10\t83,94
+const STAGE_DROP_TSV = `34-10\t104,92
+34-9\t102,93
+34-8\t101,97
+34-7\t107,95
+34-6\t105,96
+34-5\t106,93
+34-4\t103,94
+34-3\t104,92
+34-2\t102,91
+34-1\t101,97
+33-10\t107,95
+33-9\t105,96
+33-8\t103,93
+33-7\t106,94
+33-6\t104,92
+33-5\t102,91
+33-4\t101,97
+33-3\t107,95
+33-2\t105,93
+33-1\t103,96
+32-10\t94,97
+32-9\t92,96
+32-8\t94,91
+32-7\t97,92
+32-6\t96,91
+32-5\t93,95
+32-4\t94,95
+32-3\t92,96
+32-2\t91,93
+32-1\t95,97
+31-10\t96,94
+31-9\t93,92
+31-8\t97,91
+31-7\t94,93
+31-6\t92,95
+31-5\t91,97
+31-4\t93,96
+31-3\t95,94
+31-2\t97,92
+31-1\t96,91
+30-10\t83,94
 30-9\t84,92
 30-8\t87,91
 30-7\t85,97
@@ -306,9 +346,9 @@ function makeItem(code) {
     rank,
     category,
     icon: null,
-    defaultIconPath: `./blueprint-icons/${code}.webp`,
-    createdAt: CREATED_AT,
-    updatedAt: CREATED_AT,
+    defaultIconPath: rank <= 9 ? `./blueprint-icons/${code}.webp` : null,
+    createdAt: rank >= 10 ? SOURCE_UPDATED_AT : CREATED_AT,
+    updatedAt: rank >= 10 ? SOURCE_UPDATED_AT : CREATED_AT,
   };
 }
 
@@ -325,8 +365,8 @@ function parseInitialData() {
       chapter,
       number,
       drops: codes.map((code) => ({ itemId: `item-${code}`, quantity: 1 })),
-      createdAt: CREATED_AT,
-      updatedAt: CREATED_AT,
+      createdAt: chapter >= 31 ? SOURCE_UPDATED_AT : CREATED_AT,
+      updatedAt: chapter >= 31 ? SOURCE_UPDATED_AT : CREATED_AT,
     };
     return { ...stage, name: deriveStageName(stage) };
   });
@@ -339,6 +379,7 @@ function parseInitialData() {
 
   return {
     schemaVersion: 1,
+    catalogRevision: 1,
     source: {
       name: "トリッカル・もちもちほっペ大作戦 Wiki 装備設計図",
       url: "https://wikiwiki.jp/thetrickal/%E8%A3%85%E5%82%99%E8%A8%AD%E8%A8%88%E5%9B%B3",

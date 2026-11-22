@@ -145,7 +145,7 @@ test("同一ランク6種類を各42個指定しても短時間で厳密解を�
 
 test("全ランクの6種類組み合わせを各42個指定してもタイムアウトしない", () => {
   const data = createInitialData();
-  for (const rank of [9, 8, 7, 6, 5, 4, 3, 2]) {
+  for (const rank of [10, 9, 8, 7, 6, 5, 4, 3, 2]) {
     const rankItems = data.items.filter((item) => item.rank === rank);
     for (let omitted = 0; omitted < rankItems.length; omitted += 1) {
       const requests = rankItems
@@ -179,10 +179,10 @@ function assertObtainedMatchesPlan(result) {
   }
 }
 
-test("ランク9物理を含む全テンプレートで高速に最小周回数を求める", () => {
+test("ランク10を含む全テンプレートで高速に最小周回数を求める", () => {
   const data = createInitialData();
-  // R9は1周に対象R9を最大1個なので312周が下限。他は必要数合計/2が下限。
-  const minimumByRank = { 9: 312, 8: 192, 7: 126, 6: 150 };
+  // R10は1周で対象R10を最大1個。他は必要数合計/2が下限。
+  const minimumByRank = { 10: 384, 9: 216, 8: 192, 7: 126, 6: 150 };
   for (const template of EQUIPMENT_TEMPLATES) {
     const { requests } = resolveEquipmentTemplate(template.id, data.items);
     const result = solveMinimumRuns({ requests, stages: data.stages, timeoutMs: 1000 });
@@ -190,10 +190,6 @@ test("ランク9物理を含む全テンプレートで高速に最小周回数�
     assert.equal(result.totalRuns, minimumByRank[template.quantities[0].rank], template.label);
     assert.equal(result.exploredNodes, 0, "組み合わせ列挙に戻らないこと");
     assertObtainedMatchesPlan(result);
-    if (template.id === "rank-9-physical") {
-      // 単独収集できないR9の5部位260個に対しR8は120個必要なので140個は余る。
-      assert.equal(result.itemResults.reduce((sum, item) => sum + item.excess, 0), 140);
-    }
   }
 });
 

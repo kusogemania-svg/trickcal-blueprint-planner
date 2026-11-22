@@ -3,10 +3,22 @@ import assert from "node:assert/strict";
 import { INITIAL_DATA } from "../data/initial-data.js";
 import { validateMasterData } from "../src/core/validator.js";
 
-test("初期データは280ステージ・56設計図で整合している", () => {
-  assert.equal(INITIAL_DATA.stages.length, 280);
-  assert.equal(INITIAL_DATA.items.length, 56);
+test("初期データは320ステージ・63設計図で整合している", () => {
+  assert.equal(INITIAL_DATA.stages.length, 320);
+  assert.equal(INITIAL_DATA.items.length, 63);
   assert.deepEqual(validateMasterData(INITIAL_DATA), { valid: true, errors: [] });
+});
+
+test("第33・34章の20ステージすべてでランク10とランク9を1個ずつ入手できる", () => {
+  const itemsById = new Map(INITIAL_DATA.items.map((item) => [item.id, item]));
+  for (const chapter of [33, 34]) {
+    const stages = INITIAL_DATA.stages.filter((stage) => stage.chapter === chapter);
+    assert.deepEqual(stages.map((stage) => stage.number), [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    assert.equal(new Set(stages.map((stage) => stage.drops[0].itemId)).size, 7);
+    for (const stage of stages) {
+      assert.deepEqual(stage.drops.map((drop) => [itemsById.get(drop.itemId).rank, drop.quantity]), [[10, 1], [9, 1]]);
+    }
+  }
 });
 
 test("重複していた10-5は2ドロップの1ステージに正規化される", () => {

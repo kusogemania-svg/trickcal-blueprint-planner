@@ -1,4 +1,5 @@
-import { compareItems, compareStages, deriveItemName, deriveStageName } from "./catalog.js";
+import { INITIAL_DATA } from "../../data/initial-data.js";
+import { compareItems, compareStages, deriveItemName, deriveStageName, itemIdentityKey, stageIdentityKey } from "./catalog.js";
 
 const CATEGORY_RENAMES = Object.freeze({
   煌めく装飾品: "リング",
@@ -6,6 +7,45 @@ const CATEGORY_RENAMES = Object.freeze({
   物理武器: "剣",
   魔法武器: "杖",
 });
+
+function reserveId(id, usedIds) {
+  let available = id;
+  for (let suffix = 2; usedIds.has(available); suffix += 1) available = `${id}-${suffix}`;
+  usedIds.add(available);
+  return available;
+}
+
+export function addRank10Catalog(data) {
+  if ((data.catalogRevision ?? 0) >= 1) return { data, changed: false };
+
+  const items = [...data.items];
+  const stages = [...data.stages];
+  const itemsByIdentity = new Map(items.map((item) => [itemIdentityKey(item), item]));
+  const itemIds = new Set(items.map((item) => item.id));
+  const stageIds = new Set(stages.map((stage) => stage.id));
+  const stageKeys = new Set(stages.map(stageIdentityKey));
+  const mappedItemIds = new Map();
+  for (const item of INITIAL_DATA.items) {
+    const existing = itemsByIdentity.get(itemIdentityKey(item));
+    if (existing) {
+      mappedItemIds.set(item.id, existing.id);
+    } else if (item.rank === 10) {
+      const added = { ...item, id: reserveId(item.id, itemIds) };
+      items.push(added);
+      mappedItemIds.set(item.id, added.id);
+    }
+  }
+
+  for (const stage of INITIAL_DATA.stages) {
+    if (stage.chapter < 31 || stage.chapter > 34 || stageKeys.has(stageIdentityKey(stage))) continue;
+    const drops = stage.drops.map((drop) => ({ ...drop, itemId: mappedItemIds.get(drop.itemId) }));
+    // 保存データで明示的に削除された旧設計図は復元しない。
+    if (drops.some((drop) => !drop.itemId)) continue;
+    stages.push({ ...stage, id: reserveId(stage.id, stageIds), drops });
+  }
+
+  return { data: { ...data, catalogRevision: 1, items: items.sort(compareItems), stages: stages.sort(compareStages) }, changed: true };
+}
 
 export function normalizeMasterData(masterData) {
   const migrated = structuredClone(masterData);
