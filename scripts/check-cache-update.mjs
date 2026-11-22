@@ -52,10 +52,23 @@ try {
   assert.equal(await color(), "rgb(244, 165, 58)");
   await page.evaluate(async () => {
     const { createInitialData } = await import('./data/initial-data.js');
-    const { saveMasterData } = await import('./src/core/storage.js');
     const data = createInitialData();
     data.source.name = 'cache-update-preserved-data';
-    await saveMasterData(data);
+    delete data.catalogRevision;
+    data.items = data.items.filter((item) => item.rank < 10);
+    data.stages = data.stages.filter((stage) => stage.chapter <= 30);
+    // 旧アプリが残したIndexedDBデータを再現する。
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open('trickcal-blueprint-planner', 1);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('master-data', 'readwrite');
+        transaction.objectStore('master-data').put(data, 'current');
+        transaction.oncomplete = () => { database.close(); resolve(); };
+        transaction.onabort = () => { database.close(); reject(transaction.error); };
+      };
+    });
   });
   release = "current";
   await page.goto(url + "?refresh=green");
@@ -84,11 +97,12 @@ try {
   await context.setOffline(true);
   await page.reload();
   assert.equal(await color(), "rgb(40, 133, 108)");
-  assert.equal(await page.evaluate(async () => {
+  assert.deepEqual(await page.evaluate(async () => {
     const { loadMasterData } = await import('./src/core/storage.js');
-    return (await loadMasterData()).source.name;
-  }), "cache-update-preserved-data");
-  console.log("PASS: オフライン時も緑色を表示・編集済みマスターデータ保持");
+    const data = await loadMasterData();
+    return [data.source.name, data.items.filter((item) => item.rank === 10).length, data.stages.length];
+  }), ["cache-update-preserved-data", 7, 320]);
+  console.log("PASS: 旧版の端末データを保持したままランク10を追加し、オフラインでも利用できる");
 } finally {
   await browser?.close();
   await new Promise((done) => server.close(done));
